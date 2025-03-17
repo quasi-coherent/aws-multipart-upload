@@ -8,7 +8,7 @@ pub mod message;
 pub use self::message::{TestItem, TestItemStream};
 
 use aws_multipart_upload::api_types::UploadAddress;
-use aws_multipart_upload::{types::UploadClient, AwsError, Upload, UploadBuilder, UploadForever};
+use aws_multipart_upload::{types::UploadClient, AwsError, Upload, UploadBuilder};
 use std::{str::FromStr, sync::LazyLock};
 use tokio_util::codec::Encoder;
 
@@ -68,21 +68,6 @@ where
         let builder = UploadBuilder::new(self.client, self.ctrl, self.codec);
         let sink = builder
             .init_upload::<TestItem>("doesnt".to_string(), "matter".to_string())
-            .await?;
-        Ok(sink)
-    }
-
-    pub async fn init_upload_forever<T>(
-        self,
-        upload_addr: T,
-    ) -> Result<UploadForever<TestControl, E, T, U>, AwsError>
-    where
-        E: Clone,
-        T: Iterator<Item = UploadAddress>,
-    {
-        let builder = UploadBuilder::new(self.client, self.ctrl, self.codec);
-        let sink = builder
-            .init_upload_forever::<TestItem, T>(upload_addr)
             .await?;
         Ok(sink)
     }

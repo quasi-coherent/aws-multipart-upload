@@ -3,7 +3,10 @@ use aws_sdk_s3::{self as s3, primitives::ByteStream};
 use futures::future::BoxFuture;
 use std::sync::Arc;
 
-use crate::{types::api::*, AwsError};
+use crate::{
+    types::{api::*, UploadClient},
+    AwsError,
+};
 
 /// An AWS client for S3 multipart uploads.
 ///
@@ -27,9 +30,10 @@ impl AwsClient {
     pub fn get_ref(&self) -> &s3::Client {
         &self.inner
     }
+}
 
-    /// Begin a new upload and return the ID obtained from the response.
-    pub fn new_upload<'a, 'client: 'a>(
+impl UploadClient for AwsClient {
+    fn new_upload<'a, 'client: 'a>(
         &'client self,
         addr: &'a UploadAddress,
     ) -> BoxFuture<'a, Result<UploadRequestParams, AwsError>> {
@@ -48,8 +52,7 @@ impl AwsClient {
         })
     }
 
-    /// Upload one part to the multipart upload with the given part number.
-    pub fn upload_part<'a, 'client: 'a>(
+    fn upload_part<'a, 'client: 'a>(
         &'client self,
         params: &'a UploadRequestParams,
         part_number: i32,
@@ -71,8 +74,7 @@ impl AwsClient {
         })
     }
 
-    /// Complete an upload returning the entity tag of the created object.
-    pub fn complete_upload<'a, 'client: 'a>(
+    fn complete_upload<'a, 'client: 'a>(
         &'client self,
         params: &'a UploadRequestParams,
         parts: &'a UploadedParts,

@@ -66,7 +66,7 @@ where
         self.inner.complete_upload(params, parts)
     }
 
-    fn on_upload_complete<'a>(&'a self, etag: EntityTag) -> BoxFuture<'a, Result<(), AwsError>> {
+    fn on_upload_complete(&self, etag: EntityTag) -> BoxFuture<'_, Result<(), AwsError>> {
         Box::pin(async move {
             self.callback.on_upload_complete(&self.inner, etag).await?;
             Ok(())

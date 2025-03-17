@@ -1,7 +1,5 @@
 pub mod api;
-pub mod iter_addr;
 pub mod upload;
-pub mod upload_forever;
 mod write_parts;
 
 use aws_sdk_s3::primitives::ByteStream;
@@ -35,7 +33,7 @@ pub trait UploadClient {
     ) -> BoxFuture<'a, Result<EntityTag, AwsError>>;
 
     /// A callback with the `EntityId` returned by `complete_upload`.
-    fn on_upload_complete<'a>(&'a self, _etag: EntityTag) -> BoxFuture<'a, Result<(), AwsError>> {
+    fn on_upload_complete(&self, _etag: EntityTag) -> BoxFuture<'_, Result<(), AwsError>> {
         Box::pin(ready(Ok(())))
     }
 }
@@ -70,7 +68,8 @@ impl<U: UploadClient> UploadClient for Arc<U> {
     }
 }
 
-/// An interface for managing the lifecycle of a multipart upload.
+/// An interface for controlling the "checkpoints" of uploading parts and
+/// completing uploads.
 pub trait UploadControl {
     /// The desired part size in bytes.
     fn target_part_size(&self) -> usize;

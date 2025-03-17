@@ -9,15 +9,6 @@ use crate::{
     AwsError,
 };
 
-impl From<TmpFileError> for AwsError {
-    fn from(value: TmpFileError) -> Self {
-        match value {
-            TmpFileError::Io(e) => AwsError::from(e),
-            e => AwsError::DynStd(e.to_string().into()),
-        }
-    }
-}
-
 /// Another upload client for testing that writes to a temp file.
 #[derive(Debug)]
 pub struct AsyncTempFileClient {
@@ -95,5 +86,14 @@ impl UploadClient for AsyncTempFileClient {
     ) -> BoxFuture<'a, Result<EntityTag, AwsError>> {
         let etag = EntityTag::from(format!("{}_{}", params.upload_id(), parts.last_completed()));
         Box::pin(future::ready(Ok(etag)))
+    }
+}
+
+impl From<TmpFileError> for AwsError {
+    fn from(value: TmpFileError) -> Self {
+        match value {
+            TmpFileError::Io(e) => AwsError::from(e),
+            e => AwsError::DynStd(e.to_string().into()),
+        }
     }
 }

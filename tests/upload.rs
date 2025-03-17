@@ -1,4 +1,3 @@
-#![allow(unused_imports, dead_code)]
 mod helpers;
 use self::helpers::{
     CheckJsonlines, CheckRowCount, TestClient, TestItemStream, TestUpload, TRACER,
@@ -7,7 +6,6 @@ use self::helpers::{
 use aws_multipart_upload::{
     client::UploadClientExt as _,
     codec::{CsvCodec, JsonlinesCodec},
-    types::iter_addr::Timestamped,
 };
 use futures::StreamExt as _;
 
@@ -47,23 +45,5 @@ async fn upload_jsonlines_num_items() {
     if let Err(ref e) = res {
         tracing::error!(err = ?e, "error in sink");
     }
-    assert!(res.is_ok())
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn upload_forever_jsonlines_bytes() {
-    let _ = &*TRACER;
-
-    let iter_addr = Timestamped::new("my-bucket", "%Y/%m/%d%h%m%s.json").unwrap();
-    let s = TestUpload::<TestClient, JsonlinesCodec>::default()
-        .init_upload_forever(iter_addr)
-        .await;
-    assert!(s.is_ok());
-
-    let upload_sink = s.unwrap();
-    let res = TestItemStream::take_bytes(5 * 1024 * 1024)
-        .map(Ok)
-        .forward(upload_sink)
-        .await;
     assert!(res.is_ok())
 }

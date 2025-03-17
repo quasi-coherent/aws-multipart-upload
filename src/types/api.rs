@@ -1,7 +1,9 @@
 use aws_sdk_s3::types as s3;
 
-use crate::aws_ops::{create, upload};
-use crate::AwsError;
+use crate::{
+    aws_ops::{create, upload},
+    AwsError,
+};
 
 /// The ID given to this upload by AWS.
 #[derive(Debug, Clone, PartialEq)]

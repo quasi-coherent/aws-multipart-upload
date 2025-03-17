@@ -18,7 +18,7 @@ impl From<JsonlinesCodecError> for AwsError {
     }
 }
 
-/// An encoder that encodes items as lines of JSON.
+/// An encoder of lines of JSON.
 #[derive(Debug, Clone, Default)]
 pub struct JsonlinesCodec {
     _private: (),

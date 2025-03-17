@@ -6,7 +6,6 @@ pub mod codec;
 pub mod types;
 pub use self::types::api as api_types;
 pub use self::types::upload::Upload;
-pub use self::types::upload_forever::UploadForever;
 
 pub mod testing {
     pub use super::client::fs::AsyncTempFileClient;
@@ -28,6 +27,7 @@ pub const AWS_MAX_UPLOAD_PARTS: usize = 10000;
 /// The default upload size is 100MiB.
 pub const AWS_DEFAULT_TARGET_UPLOAD_SIZE: usize = 100 * 1024 * 1024;
 
+/// Errors that can be produced by the API.
 #[non_exhaustive]
 #[derive(Debug, thiserror::Error)]
 pub enum AwsError {
@@ -63,7 +63,7 @@ impl From<AwsError> for std::io::Error {
     }
 }
 
-/// A builder for the `Upload` or `UploadForever` sinks.
+/// A builder for the `Upload` sink.
 pub struct UploadBuilder<C, E, U> {
     ctrl: C,
     codec: E,
@@ -96,29 +96,13 @@ impl<C, E, U> UploadBuilder<C, E, U> {
         let sink = Upload::new(self.client, self.ctrl, self.codec, params);
         Ok(sink)
     }
-
-    /// `init_upload_forever` takes the supplied iterator of S3 addresses and
-    /// returns the self-driving sink `UploadForever` in a future.
-    pub async fn init_upload_forever<I, T>(
-        self,
-        addr: T,
-    ) -> Result<UploadForever<C, E, T, U>, AwsError>
-    where
-        C: types::UploadControl + Send + Sync + 'static,
-        E: tokio_util::codec::Encoder<I> + Clone,
-        T: Iterator<Item = api_types::UploadAddress>,
-        U: types::UploadClient + Send + Sync + 'static,
-    {
-        let sink = UploadForever::new(self.client, self.ctrl, self.codec, addr).await?;
-        Ok(sink)
-    }
 }
 
-/// Default parameters for part/object uploads.
+/// Basic default parameters for part/object uploads.
 #[derive(Debug, Clone)]
 pub struct DefaultControl {
     target_part_size: usize,
-    target_upload_size: usize,
+    target_upload_size: Option<usize>,
     target_num_parts: Option<usize>,
 }
 
@@ -133,7 +117,7 @@ impl DefaultControl {
     }
 
     pub fn set_target_upload_size(mut self, n: usize) -> Self {
-        self.target_upload_size = n;
+        self.target_upload_size = Some(n);
         self
     }
 
@@ -147,7 +131,7 @@ impl Default for DefaultControl {
     fn default() -> Self {
         Self {
             target_part_size: AWS_MIN_PART_SIZE,
-            target_upload_size: AWS_DEFAULT_TARGET_UPLOAD_SIZE,
+            target_upload_size: None,
             target_num_parts: None,
         }
     }
@@ -159,7 +143,12 @@ impl self::types::UploadControl for DefaultControl {
     }
 
     fn is_upload_ready(&self, upload_size: usize, num_parts: usize) -> bool {
-        upload_size >= self.target_upload_size
-            || num_parts >= self.target_num_parts.unwrap_or_default()
+        self.target_upload_size
+            .map(|n| n <= upload_size)
+            .unwrap_or_default()
+            || self
+                .target_num_parts
+                .map(|n| n <= num_parts)
+                .unwrap_or_default()
     }
 }

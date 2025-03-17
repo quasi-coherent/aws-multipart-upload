@@ -4,9 +4,10 @@ use std::task::{ready, Context, Poll};
 use std::{io::Error as IoError, pin::Pin, sync::Arc};
 use tokio_util::codec::{Encoder, FramedWrite};
 
-use super::write_parts::{UploadState, WriteParts};
-use super::{UploadClient, UploadControl};
-use crate::{types::api::*, AwsError};
+use crate::{
+    types::{api::*, write_parts::WriteParts, UploadClient, UploadControl},
+    AwsError,
+};
 
 pin_project! {
     /// `Upload` is a sink that implements the lifecycle of a single multipart
@@ -39,19 +40,8 @@ impl<E> Upload<E> {
         }
     }
 
-    pub(crate) fn get_upload_state_ref(&self) -> &UploadState {
-        self.inner.get_ref().get_upload_state_ref()
-    }
-
-    pub(crate) fn should_complete_upload(&self) -> bool {
-        let size = self.inner.get_ref().upload_size();
-        let num_parts = self.inner.get_ref().num_parts();
-        self.ctrl.is_upload_ready(size, num_parts)
-    }
-
     fn should_upload_part(&self) -> bool {
         let part_size = self.inner.write_buffer().len();
-        tracing::trace!(part_size, "current part size");
         self.ctrl.is_part_ready(part_size)
     }
 
@@ -73,8 +63,6 @@ impl<E> Upload<E> {
             .complete_upload(&params, &parts)
             .as_mut()
             .poll(cx))?;
-        tracing::trace!(%etag, "completed upload, executing callback");
-
         // Callback with the uploaded object's entity tag.
         ready!(self.client.on_upload_complete(etag).as_mut().poll(cx))?;
 
@@ -107,13 +95,11 @@ where
         // Flush the framed writer, which has the effect of uploading the last
         // part with whatever was flushed to it.  This is OK with AWS because
         // the last part isn't held to the minimum part size requirement.
-        tracing::trace!("completing upload");
         ready!(self.as_mut().project().inner.poll_flush(cx))?;
         self.poll_complete_upload(cx)
     }
 
     fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        tracing::trace!("poll_close called");
         ready!(self.as_mut().project().inner.poll_flush(cx))?;
         self.poll_complete_upload(cx)
     }

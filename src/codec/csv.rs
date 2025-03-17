@@ -20,7 +20,7 @@ impl From<CsvCodecError> for AwsError {
     }
 }
 
-/// An encoder that encodes items as CSV.
+/// A CSV encoder.
 #[derive(Debug, Clone, Default)]
 pub struct CsvCodec {
     pub has_headers: bool,

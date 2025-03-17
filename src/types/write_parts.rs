@@ -5,7 +5,7 @@ use std::task::{ready, Context, Poll};
 use std::{io::Error as IoError, sync::Arc};
 use tokio::io::AsyncWrite;
 
-use super::{api::*, UploadClient, UploadControl};
+use crate::types::{api::*, UploadClient, UploadControl};
 
 /// An implementation of `AsyncWrite` whose `poll_flush` uploads the write
 /// buffer as a part.
@@ -55,16 +55,6 @@ impl WriteParts {
     /// Returns the size of the part currently being written.
     pub(crate) fn part_size(&self) -> usize {
         self.buf.len()
-    }
-
-    /// Get the total number of bytes uploaded so far.
-    pub(crate) fn upload_size(&self) -> usize {
-        self.upload_state.upload_size()
-    }
-
-    /// Get the number of parts that have been uploaded so far.
-    pub(crate) fn num_parts(&self) -> usize {
-        self.upload_state.num_parts()
     }
 
     /// Clone the state's `UploadedParts`.
@@ -156,16 +146,8 @@ impl UploadState {
         self.uploaded_parts.update(etag);
     }
 
-    fn upload_size(&self) -> usize {
-        self.upload_size
-    }
-
     fn uploaded_parts(&self) -> &UploadedParts {
         &self.uploaded_parts
-    }
-
-    fn num_parts(&self) -> usize {
-        self.uploaded_parts.num_parts()
     }
 
     fn current_part_number(&self) -> i32 {

@@ -10,7 +10,7 @@ impl Default for TestControl {
     fn default() -> Self {
         Self {
             part_size: 512,
-            upload_size: 4196,
+            upload_size: 5 * 1024 * 1024,
         }
     }
 }

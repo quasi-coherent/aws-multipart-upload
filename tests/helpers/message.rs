@@ -8,7 +8,7 @@ pub enum TestEnum {
     Right,
 }
 
-/// A test item for the upload sinks.
+/// A test item for the upload sink.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TestItem {
     a: String,
@@ -49,6 +49,7 @@ impl TestItemStream {
         stream::iter(0..n).map(|_| TestItem::new())
     }
 
+    #[allow(dead_code)]
     pub fn take_bytes(n: usize) -> impl Stream<Item = TestItem> {
         stream::unfold(0, move |bytes| async move {
             if bytes >= n {

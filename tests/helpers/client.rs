@@ -1,7 +1,7 @@
 use aws_multipart_upload::client::OnComplete;
 use aws_multipart_upload::types::UploadClient;
 use aws_multipart_upload::{api_types::*, testing::HashMapClient, AwsError};
-use futures::future::{ready, BoxFuture};
+use futures::future::BoxFuture;
 
 use super::TestItem;
 
@@ -28,14 +28,11 @@ impl OnComplete<TestClient> for CheckRowCount {
             let count = self.0;
             let store = client.0.clone_inner().await;
             let mut item_count = 0;
-            let mut parts = 0;
             for (_, part) in store.into_iter() {
                 let de = String::from_utf8(part).unwrap();
                 let rs: Vec<String> = de.lines().map(|s| s.to_string()).collect();
                 item_count += rs.len();
-                parts += 1;
             }
-            tracing::trace!(item_count, parts, "items uploaded");
             if item_count != count {
                 Err(AwsError::Custom(format!(
                     "incorrect item count: got {item_count}, expected {count}"
@@ -60,7 +57,6 @@ impl OnComplete<TestClient> for CheckJsonlines {
             let count = self.0;
             let store = client.0.clone_inner().await;
             let mut item_count = 0;
-            let mut parts = 0;
             for (_, part) in store.into_iter() {
                 let de = String::from_utf8(part).unwrap();
                 let rs: Result<Vec<TestItem>, _> =
@@ -69,11 +65,8 @@ impl OnComplete<TestClient> for CheckJsonlines {
                     tracing::error!(error = ?rs.unwrap_err(), "error deserializing part");
                     continue;
                 };
-                tracing::warn!("{items:?}");
                 item_count += items.len();
-                parts += 1;
             }
-            tracing::trace!(item_count, parts, "items uploaded");
             if item_count != count {
                 Err(AwsError::Custom(format!(
                     "incorrect item count: got {item_count}, expected {count}"
