@@ -1,10 +1,14 @@
 [package]
 name = "aws-multipart-upload"
 version = "0.1.0-alpha.1"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/quasi-coherent/aws-multipart-upload"
 readme = "README.md"
 description = "AWS S3 multipart upload sinks"
 edition = "2021"
 authors = ["Daniel Donohue <d.michael.donohue@gmail.com>"]
+categories = ["asynchronous"]
+keywords = ["aws", "s3", "multipart", "upload"]
 
 [dependencies]
 async-tempfile = "0.7"
