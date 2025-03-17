@@ -49,8 +49,14 @@ impl<E> Upload<E> {
         self.ctrl.is_upload_ready(size, num_parts)
     }
 
+    fn should_upload_part(&self) -> bool {
+        let part_size = self.inner.write_buffer().len();
+        tracing::trace!(part_size, "current part size");
+        self.ctrl.is_part_ready(part_size)
+    }
+
     fn poll_complete_upload<I>(
-        mut self: Pin<&mut Self>,
+        self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Result<(), AwsError>>
     where
@@ -60,13 +66,7 @@ impl<E> Upload<E> {
     {
         let parts = self.inner.get_ref().uploaded_parts();
         let params = self.inner.get_ref().params();
-        let this = self.as_mut().project();
         tracing::trace!(?parts, ?params, "completing upload");
-
-        // Flush the framed writer, which has the effect of uploading the last
-        // part with whatever was flushed to it.  This is OK with AWS because
-        // the last part isn't held to the minimum part size requirement.
-        ready!(this.inner.poll_flush(cx))?;
 
         let etag = ready!(self
             .client
@@ -74,8 +74,9 @@ impl<E> Upload<E> {
             .as_mut()
             .poll(cx))?;
         tracing::trace!(%etag, "completed upload, executing callback");
+
         // Callback with the uploaded object's entity tag.
-        ready!(self.client.on_upload_complete(&etag).as_mut().poll(cx))?;
+        ready!(self.client.on_upload_complete(etag).as_mut().poll(cx))?;
 
         Poll::Ready(Ok(()))
     }
@@ -89,16 +90,12 @@ where
 {
     type Error = AwsError;
 
-    fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        if self.should_complete_upload() {
-            tracing::trace!(
-                should_complete = self.should_complete_upload(),
-                "calling poll_flush to complete",
-            );
-            self.poll_flush(cx)
-        } else {
-            Poll::Ready(Ok(()))
+    fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        if self.should_upload_part() {
+            ready!(self.as_mut().project().inner.poll_flush(cx))?;
         }
+
+        Poll::Ready(Ok(()))
     }
 
     fn start_send(self: Pin<&mut Self>, item: I) -> Result<(), Self::Error> {
@@ -106,12 +103,18 @@ where
         Ok(())
     }
 
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        // Flush the framed writer, which has the effect of uploading the last
+        // part with whatever was flushed to it.  This is OK with AWS because
+        // the last part isn't held to the minimum part size requirement.
+        tracing::trace!("completing upload");
+        ready!(self.as_mut().project().inner.poll_flush(cx))?;
         self.poll_complete_upload(cx)
     }
 
-    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        tracing::trace!("calling poll_close");
+    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        tracing::trace!("poll_close called");
+        ready!(self.as_mut().project().inner.poll_flush(cx))?;
         self.poll_complete_upload(cx)
     }
 }

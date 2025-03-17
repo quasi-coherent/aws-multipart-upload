@@ -52,21 +52,19 @@ impl CsvCodec {
 
 impl<Item> Encoder<Item> for CsvCodec
 where
-    Item: Serialize,
+    Item: Serialize + std::fmt::Debug,
 {
     type Error = CsvCodecError;
 
     fn encode(&mut self, item: Item, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        let wtr: &mut [u8] = &mut [];
-        let mut csv = self.from_writer(wtr);
+        let mut csv = self.from_writer(vec![]);
         // This writes a CSV row with newline or CLRF character as the line
         // terminator, so there is no need to reserve "+1" and write out the
         // line terminating character ourselves.
         csv.serialize(item)?;
-        csv.flush()?;
-        let bytes = csv.into_inner().map_err(|e| e.into_error())?;
-        dst.reserve(bytes.len());
-        dst.put_slice(bytes);
+        let inner = csv.into_inner().map_err(|e| e.into_error())?;
+        dst.reserve(inner.len());
+        dst.put_slice(&inner);
         Ok(())
     }
 }

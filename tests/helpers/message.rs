@@ -2,13 +2,19 @@ use futures::{stream, Stream, StreamExt as _};
 use rand::{rngs::SmallRng, Rng as _, SeedableRng};
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum TestEnum {
+    Left,
+    Right,
+}
+
 /// A test item for the upload sinks.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TestItem {
     a: String,
     b: i32,
     c: Option<bool>,
-    d: Vec<f32>,
+    d: TestEnum,
 }
 
 impl TestItem {
@@ -26,7 +32,11 @@ impl TestItem {
             let x = rng.random_bool(0.5);
             Some(x)
         };
-        let d: Vec<f32> = rng.random_iter().take(5).collect();
+        let d = if rng.random_bool(0.8) {
+            TestEnum::Left
+        } else {
+            TestEnum::Right
+        };
         Self { a, b, c, d }
     }
 }

@@ -32,24 +32,9 @@ impl WriteParts {
         }
     }
 
-    /// Returns the size of the part currently being written.
-    pub(crate) fn part_size(&self) -> usize {
-        self.buf.len()
-    }
-
-    /// Get a reference to the internal state of this writer.
-    pub(crate) fn get_upload_state_ref(&self) -> &UploadState {
-        &self.upload_state
-    }
-
-    /// Get the total number of bytes uploaded so far.
-    pub(crate) fn upload_size(&self) -> usize {
-        self.upload_state.upload_size()
-    }
-
-    /// Get the number of parts that have been uploaded so far.
-    pub(crate) fn num_parts(&self) -> usize {
-        self.upload_state.num_parts()
+    /// Says whether to call `poll_upload` to upload the current part.
+    pub(crate) fn should_upload_part(&self) -> bool {
+        self.ctrl.is_part_ready(self.part_size())
     }
 
     /// Get a reference to the upload request parameters for this upload.
@@ -60,6 +45,26 @@ impl WriteParts {
     /// Clone the request parameters.
     pub(crate) fn params(&self) -> UploadRequestParams {
         self.params.clone()
+    }
+
+    /// Get a reference to the internal state of this writer.
+    pub(crate) fn get_upload_state_ref(&self) -> &UploadState {
+        &self.upload_state
+    }
+
+    /// Returns the size of the part currently being written.
+    pub(crate) fn part_size(&self) -> usize {
+        self.buf.len()
+    }
+
+    /// Get the total number of bytes uploaded so far.
+    pub(crate) fn upload_size(&self) -> usize {
+        self.upload_state.upload_size()
+    }
+
+    /// Get the number of parts that have been uploaded so far.
+    pub(crate) fn num_parts(&self) -> usize {
+        self.upload_state.num_parts()
     }
 
     /// Clone the state's `UploadedParts`.
@@ -78,11 +83,6 @@ impl WriteParts {
 
     fn new_buf(&self) -> BytesMut {
         Self::init_buf(self.ctrl.target_part_size())
-    }
-
-    // Says whether to call `poll_upload` after writing the current bytes.
-    fn should_upload(&self, buf_size: usize) -> bool {
-        self.ctrl.is_part_ready(self.part_size() + buf_size)
     }
 
     fn poll_upload(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), IoError>> {
@@ -117,7 +117,7 @@ impl AsyncWrite for WriteParts {
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<Result<usize, IoError>> {
-        let should_upload = self.should_upload(buf.len());
+        let should_upload_part = self.should_upload_part();
         self.as_mut().buf.extend_from_slice(buf);
         tracing::trace!(
             buf_size = buf.len(),
@@ -125,7 +125,7 @@ impl AsyncWrite for WriteParts {
             "wrote to buffer"
         );
 
-        if should_upload {
+        if should_upload_part {
             tracing::trace!(upload_state = ?self.get_upload_state_ref(), "flushing to upload part");
             ready!(self.poll_flush(cx))?;
         }

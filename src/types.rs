@@ -35,10 +35,7 @@ pub trait UploadClient {
     ) -> BoxFuture<'a, Result<EntityTag, AwsError>>;
 
     /// A callback with the `EntityId` returned by `complete_upload`.
-    fn on_upload_complete<'a, 'client: 'a>(
-        &'client self,
-        _etag: &'a EntityTag,
-    ) -> BoxFuture<'a, Result<(), AwsError>> {
+    fn on_upload_complete<'a>(&'a self, _etag: EntityTag) -> BoxFuture<'a, Result<(), AwsError>> {
         Box::pin(ready(Ok(())))
     }
 }
@@ -68,10 +65,7 @@ impl<U: UploadClient> UploadClient for Arc<U> {
         U::complete_upload(self, params, parts)
     }
 
-    fn on_upload_complete<'a, 'client: 'a>(
-        &'client self,
-        etag: &'a EntityTag,
-    ) -> BoxFuture<'a, Result<(), AwsError>> {
+    fn on_upload_complete(&self, etag: EntityTag) -> BoxFuture<'_, Result<(), AwsError>> {
         U::on_upload_complete(self, etag)
     }
 }

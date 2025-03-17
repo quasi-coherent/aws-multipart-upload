@@ -1,7 +1,7 @@
 use aws_sdk_s3::primitives::ByteStream;
 use futures::future::{ready, BoxFuture};
 use std::collections::HashMap;
-use std::sync::RwLock;
+use tokio::sync::Mutex;
 
 use crate::{
     types::{api::*, UploadClient},
@@ -10,22 +10,29 @@ use crate::{
 
 /// For testing, a client that writes a part `n` with data `bytes` as the entry
 /// `(n, bytes)` in a hash map.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct HashMapClient {
-    store: RwLock<HashMap<i32, Vec<u8>>>,
+    store: Mutex<HashMap<i32, Vec<u8>>>,
+}
+
+impl Default for HashMapClient {
+    fn default() -> Self {
+        Self {
+            store: Mutex::new(HashMap::new()),
+        }
+    }
 }
 
 impl HashMapClient {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            store: Mutex::new(HashMap::new()),
+        }
     }
 
-    pub fn into_inner(self) -> HashMap<i32, Vec<u8>> {
-        self.store.into_inner().unwrap()
-    }
-
-    pub fn clone_inner(&self) -> HashMap<i32, Vec<u8>> {
-        self.store.read().unwrap().clone()
+    pub async fn clone_inner(&self) -> HashMap<i32, Vec<u8>> {
+        let map = self.store.lock().await;
+        map.clone()
     }
 }
 
@@ -40,12 +47,8 @@ impl UploadClient for HashMapClient {
             let etag = EntityTag::new(format!("{}_{}", params.key(), part_number));
             let vec = part.collect().await.map(|data| data.to_vec())?;
 
-            let lock = self.store.read().unwrap();
-            if lock.get(&part_number).is_some() {
-                return Ok(etag);
-            }
-            let mut lock = self.store.write().unwrap();
-            let _ = lock.entry(part_number).or_insert(vec);
+            let mut map = self.store.lock().await;
+            let _ = map.entry(part_number).or_insert(vec);
 
             Ok(etag)
         })

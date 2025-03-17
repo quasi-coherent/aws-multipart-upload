@@ -1,7 +1,8 @@
 use async_tempfile::{Error as TmpFileError, TempFile};
 use aws_sdk_s3::primitives::ByteStream;
-use futures::{future, future::BoxFuture, lock::Mutex};
+use futures::{future, future::BoxFuture};
 use tokio::io::AsyncWriteExt as _;
+use tokio::sync::Mutex;
 
 use crate::{
     types::{api::*, UploadClient},
@@ -37,20 +38,20 @@ impl AsyncTempFileClient {
     }
 
     async fn set(&self) -> Result<String, AwsError> {
-        let f = TempFile::new().await?;
-        let filepath = f
+        let inner = TempFile::new().await?;
+        let path = inner
             .file_path()
             .to_str()
             .map(str::to_string)
             .ok_or_else(|| AwsError::Missing("upload_id"))?;
-        let mut lock = self.file.lock().await;
-        *lock = Some(f);
-        Ok(filepath)
+        let mut f = self.file.lock().await;
+        *f = Some(inner);
+        Ok(path)
     }
 
     async fn write(&self, buf: &[u8]) -> Result<(), AwsError> {
-        let mut lock = self.file.lock().await;
-        let f = lock
+        let mut inner = self.file.lock().await;
+        let f = inner
             .as_deref_mut()
             .ok_or_else(|| AwsError::Missing("no file set for `AsyncTempFileClient::write`"))?;
         f.write_all(buf).await?;

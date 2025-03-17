@@ -77,9 +77,6 @@ where
             .ok_or_else(|| AwsError::UploadForever)?;
         let mut this = self.project();
 
-        // Flush the underlying upload sink before starting the next and
-        // overwriting the pinned version of the previous sink.
-        ready!(this.inner.as_mut().poll_flush(cx))?;
         let params = ready!(this.client.new_upload(&addr).as_mut().poll(cx))?;
         tracing::trace!(params = ?params, "starting new upload");
 
@@ -122,11 +119,17 @@ where
         Ok(())
     }
 
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        let mut this = self.as_mut().project();
+        // Flush the underlying upload sink before starting the next and
+        // overwriting the pinned version of the previous sink.
+        ready!(this.inner.as_mut().poll_flush(cx))?;
         self.poll_new_upload(cx)
     }
 
-    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        let mut this = self.as_mut().project();
+        ready!(this.inner.as_mut().poll_flush(cx))?;
         self.poll_new_upload(cx)
     }
 }
