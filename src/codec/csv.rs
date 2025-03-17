@@ -4,6 +4,8 @@ use serde::Serialize;
 use std::io::Write;
 use tokio_util::codec::Encoder;
 
+use crate::AwsError;
+
 #[derive(Debug, thiserror::Error)]
 pub enum CsvCodecError {
     #[error("csv error in encoding bytes {0}")]
@@ -12,11 +14,17 @@ pub enum CsvCodecError {
     Io(#[from] std::io::Error),
 }
 
+impl From<CsvCodecError> for AwsError {
+    fn from(value: CsvCodecError) -> Self {
+        Self::Codec(value.to_string())
+    }
+}
+
 /// An encoder that encodes items as CSV.
 #[derive(Debug, Clone, Default)]
 pub struct CsvCodec {
-    has_headers: bool,
-    term: Terminator,
+    pub has_headers: bool,
+    pub term: Terminator,
 }
 
 impl CsvCodec {

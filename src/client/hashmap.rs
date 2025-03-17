@@ -11,11 +11,11 @@ use crate::{
 /// For testing, a client that writes a part `n` with data `bytes` as the entry
 /// `(n, bytes)` in a hash map.
 #[derive(Debug, Default)]
-pub struct MockClient {
+pub struct HashMapClient {
     store: RwLock<HashMap<i32, Vec<u8>>>,
 }
 
-impl MockClient {
+impl HashMapClient {
     pub fn new() -> Self {
         Self::default()
     }
@@ -23,9 +23,13 @@ impl MockClient {
     pub fn into_inner(self) -> HashMap<i32, Vec<u8>> {
         self.store.into_inner().unwrap()
     }
+
+    pub fn clone_inner(&self) -> HashMap<i32, Vec<u8>> {
+        self.store.read().unwrap().clone()
+    }
 }
 
-impl UploadClient for MockClient {
+impl UploadClient for HashMapClient {
     fn upload_part<'a, 'c: 'a>(
         &'c self,
         params: &'a UploadRequestParams,
@@ -47,7 +51,7 @@ impl UploadClient for MockClient {
         })
     }
 
-    /// This is not meaningful for this client.
+    // This is not meaningful for this client.
     fn new_upload<'a, 'c: 'a>(
         &'c self,
         addr: &'a UploadAddress,
@@ -56,7 +60,7 @@ impl UploadClient for MockClient {
         Box::pin(ready(Ok(UploadRequestParams::new(upload_id, addr.clone()))))
     }
 
-    /// This is not meaningful for this client.
+    // This is not meaningful for this client.
     fn complete_upload<'a, 'c: 'a>(
         &'c self,
         params: &'a UploadRequestParams,

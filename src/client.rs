@@ -1,2 +1,3 @@
 pub mod aws;
-pub mod mock;
+pub mod fs;
+pub mod hashmap;

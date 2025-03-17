@@ -2,12 +2,20 @@ use bytes::{BufMut, BytesMut};
 use serde::Serialize;
 use tokio_util::codec::Encoder;
 
+use crate::AwsError;
+
 #[derive(Debug, thiserror::Error)]
 pub enum JsonlinesCodecError {
     #[error("serde_json encoding error {0}")]
     Serde(#[from] serde_json::Error),
     #[error("io error {0}")]
     Io(#[from] std::io::Error),
+}
+
+impl From<JsonlinesCodecError> for AwsError {
+    fn from(value: JsonlinesCodecError) -> Self {
+        Self::Codec(value.to_string())
+    }
 }
 
 /// An encoder that encodes items as lines of JSON.

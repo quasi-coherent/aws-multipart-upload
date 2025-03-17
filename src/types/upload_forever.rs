@@ -4,7 +4,7 @@ use std::task::{ready, Context, Poll};
 use std::{io::Error as IoError, pin::Pin, sync::Arc};
 use tokio_util::codec::Encoder;
 
-use super::{upload::Upload, UploadClient, UploadControl};
+use super::{upload::Upload, write_parts::UploadState, UploadClient, UploadControl};
 use crate::{types::api::*, AwsError};
 
 pin_project! {
@@ -57,6 +57,10 @@ where
         self.inner.should_complete_upload()
     }
 
+    fn get_upload_state_ref(&self) -> &UploadState {
+        self.inner.get_upload_state_ref()
+    }
+
     fn poll_new_upload<I>(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -77,11 +81,13 @@ where
         // overwriting the pinned version of the previous sink.
         ready!(this.inner.as_mut().poll_flush(cx))?;
         let params = ready!(this.client.new_upload(&addr).as_mut().poll(cx))?;
+        tracing::trace!(params = ?params, "starting new upload");
 
         let new_client = Arc::clone(this.client);
         let new_ctrl = Arc::clone(this.ctrl);
         let new_inner = Upload::new(new_client, new_ctrl, this.encoder.clone(), params);
         this.inner.as_mut().set(new_inner);
+        tracing::trace!(upload_state = ?this.inner.get_upload_state_ref(), "started new upload");
 
         Poll::Ready(Ok(()))
     }
@@ -100,6 +106,11 @@ where
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         if self.should_complete_upload() {
+            tracing::trace!(
+                upload_state = ?self.get_upload_state_ref(),
+                should_complete = self.should_complete_upload(),
+                "completing upload"
+            );
             self.poll_flush(cx)
         } else {
             Poll::Ready(Ok(()))

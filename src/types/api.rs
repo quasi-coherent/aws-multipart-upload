@@ -13,9 +13,9 @@ impl From<String> for UploadId {
     }
 }
 
-impl<'a> From<&'a UploadId> for String {
-    fn from(value: &'a UploadId) -> Self {
-        value.0.clone()
+impl std::fmt::Display for UploadId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 
@@ -84,9 +84,9 @@ impl EntityTag {
     }
 }
 
-impl<'a> From<&'a EntityTag> for String {
-    fn from(val: &'a EntityTag) -> String {
-        val.0.clone()
+impl std::fmt::Display for EntityTag {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 
@@ -148,7 +148,7 @@ impl<'a> From<&'a UploadedParts> for s3::CompletedMultipartUpload {
         let parts = val.parts.iter().fold(Vec::new(), |mut acc, (t, n)| {
             acc.push(
                 s3::CompletedPart::builder()
-                    .e_tag(t)
+                    .e_tag(t.to_string())
                     .part_number(*n)
                     .build(),
             );

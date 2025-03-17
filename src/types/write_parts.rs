@@ -37,6 +37,11 @@ impl WriteParts {
         self.buf.len()
     }
 
+    /// Get a reference to the internal state of this writer.
+    pub(crate) fn get_upload_state_ref(&self) -> &UploadState {
+        &self.upload_state
+    }
+
     /// Get the total number of bytes uploaded so far.
     pub(crate) fn upload_size(&self) -> usize {
         self.upload_state.upload_size()
@@ -92,6 +97,7 @@ impl WriteParts {
         let params = self.params_ref();
         let part_number = self.upload_state.current_part_number();
         let part_size = self.part_size();
+        tracing::trace!(?params, part_number, part_size, "uploading part");
 
         let etag = ready!(self
             .client
@@ -99,6 +105,7 @@ impl WriteParts {
             .as_mut()
             .poll(cx))?;
         self.as_mut().upload_state.update_state(part_size, etag);
+        tracing::trace!(upload_state = ?self.upload_state, "updated upload state");
 
         Poll::Ready(Ok(()))
     }
@@ -112,8 +119,14 @@ impl AsyncWrite for WriteParts {
     ) -> Poll<Result<usize, IoError>> {
         let should_upload = self.should_upload(buf.len());
         self.as_mut().buf.extend_from_slice(buf);
+        tracing::trace!(
+            buf_size = buf.len(),
+            part_size = self.buf.len(),
+            "wrote to buffer"
+        );
 
         if should_upload {
+            tracing::trace!(upload_state = ?self.get_upload_state_ref(), "flushing to upload part");
             ready!(self.poll_flush(cx))?;
         }
 
@@ -132,7 +145,7 @@ impl AsyncWrite for WriteParts {
 }
 
 #[derive(Debug, Clone, Default)]
-struct UploadState {
+pub(crate) struct UploadState {
     upload_size: usize,
     uploaded_parts: UploadedParts,
 }
