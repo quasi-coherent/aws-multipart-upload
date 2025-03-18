@@ -33,9 +33,25 @@ pub trait UploadClient {
         parts: &'a UploadedParts,
     ) -> BoxFuture<'a, Result<EntityTag, AwsError>>;
 
-    /// A callback with the entity tag returned by `complete_upload`.
+    /// A callback with the entity tag returned by `upload_part` and the
+    /// parameters used to call it.
     #[allow(unused_variables)]
-    fn on_upload_complete(&self, etag: EntityTag) -> BoxFuture<'_, Result<(), AwsError>> {
+    fn on_upload_part(
+        &self,
+        params: UploadParams,
+        etag: EntityTag,
+    ) -> BoxFuture<'_, Result<(), AwsError>> {
+        Box::pin(ready(Ok(())))
+    }
+
+    /// A callback with the entity tag returned by `complete_upload` and the
+    /// parameters used to call it.
+    #[allow(unused_variables)]
+    fn on_upload_complete(
+        &self,
+        params: UploadParams,
+        etag: EntityTag,
+    ) -> BoxFuture<'_, Result<(), AwsError>> {
         Box::pin(ready(Ok(())))
     }
 }
@@ -65,8 +81,20 @@ impl<T: UploadClient> UploadClient for Arc<T> {
         T::complete_upload(self, params, parts)
     }
 
-    fn on_upload_complete(&self, etag: EntityTag) -> BoxFuture<'_, Result<(), AwsError>> {
-        T::on_upload_complete(self, etag)
+    fn on_upload_part(
+        &self,
+        params: UploadParams,
+        etag: EntityTag,
+    ) -> BoxFuture<'_, Result<(), AwsError>> {
+        T::on_upload_part(self, params, etag)
+    }
+
+    fn on_upload_complete(
+        &self,
+        params: UploadParams,
+        etag: EntityTag,
+    ) -> BoxFuture<'_, Result<(), AwsError>> {
+        T::on_upload_complete(self, params, etag)
     }
 }
 
@@ -75,13 +103,21 @@ impl<T: UploadClient> UploadClient for Arc<T> {
 /// type and use it with an existing client in `with_callback` from the
 /// extension trait [`UploadClientExt`] in order to define custom behavior for
 /// after an upload is completed.
-pub trait OnComplete<T>
+pub trait OnUploadAction<T>
 where
     T: UploadClient,
 {
+    fn on_upload_part<'a, 'c: 'a>(
+        &'c self,
+        client: &'a T,
+        params: UploadParams,
+        etag: EntityTag,
+    ) -> BoxFuture<'a, Result<(), AwsError>>;
+
     fn on_upload_complete<'a, 'c: 'a>(
         &'c self,
         client: &'a T,
+        params: UploadParams,
         etag: EntityTag,
     ) -> BoxFuture<'a, Result<(), AwsError>>;
 }
@@ -101,17 +137,17 @@ impl<T, F> WithCallback<T, F> {
 impl<T, F> UploadClient for WithCallback<T, F>
 where
     T: UploadClient + Send + Sync,
-    F: OnComplete<T> + Send + Sync,
+    F: OnUploadAction<T> + Send + Sync,
 {
-    fn new_upload<'a, 'client: 'a>(
-        &'client self,
+    fn new_upload<'a, 'c: 'a>(
+        &'c self,
         addr: &'a UploadAddress,
     ) -> BoxFuture<'a, Result<UploadParams, AwsError>> {
         self.inner.new_upload(addr)
     }
 
-    fn upload_part<'a, 'client: 'a>(
-        &'client self,
+    fn upload_part<'a, 'c: 'a>(
+        &'c self,
         params: &'a UploadParams,
         part_number: i32,
         part: ByteStream,
@@ -119,17 +155,36 @@ where
         self.inner.upload_part(params, part_number, part)
     }
 
-    fn complete_upload<'a, 'client: 'a>(
-        &'client self,
+    fn complete_upload<'a, 'c: 'a>(
+        &'c self,
         params: &'a UploadParams,
         parts: &'a UploadedParts,
     ) -> BoxFuture<'a, Result<EntityTag, AwsError>> {
         self.inner.complete_upload(params, parts)
     }
 
-    fn on_upload_complete(&self, etag: EntityTag) -> BoxFuture<'_, Result<(), AwsError>> {
+    fn on_upload_part(
+        &self,
+        params: UploadParams,
+        etag: EntityTag,
+    ) -> BoxFuture<'_, Result<(), AwsError>> {
         Box::pin(async move {
-            self.callback.on_upload_complete(&self.inner, etag).await?;
+            self.callback
+                .on_upload_part(&self.inner, params, etag)
+                .await?;
+            Ok(())
+        })
+    }
+
+    fn on_upload_complete(
+        &self,
+        params: UploadParams,
+        etag: EntityTag,
+    ) -> BoxFuture<'_, Result<(), AwsError>> {
+        Box::pin(async move {
+            self.callback
+                .on_upload_complete(&self.inner, params, etag)
+                .await?;
             Ok(())
         })
     }
@@ -145,7 +200,7 @@ where
     fn with_callback<F>(self, callback: F) -> WithCallback<Self, F>
     where
         Self: Sized,
-        F: OnComplete<Self>,
+        F: OnUploadAction<Self>,
     {
         WithCallback::new(self, callback)
     }
