@@ -133,6 +133,13 @@ impl<E> UploadImpl<E> {
             .inner
             .poll_upload_part(cx, part_number))?;
 
+        // Execute callback with the uploaded object's entity tag.
+        ready!(self
+            .client
+            .on_upload_complete(self.upload_params().clone(), etag.clone())
+            .as_mut()
+            .poll(cx))?;
+
         // Update state from a successful part upload.
         self.as_mut().state.update_from_part(part_size, etag);
         self.as_mut().part_size = 0;
@@ -174,7 +181,11 @@ impl<E> UploadImpl<E> {
         let etag = ready!(self.client.complete_upload(params, parts).as_mut().poll(cx))?;
 
         // Execute callback with the uploaded object's entity tag.
-        ready!(self.client.on_upload_complete(etag).as_mut().poll(cx))?;
+        ready!(self
+            .client
+            .on_upload_complete(params.clone(), etag)
+            .as_mut()
+            .poll(cx))?;
 
         Poll::Ready(Ok(()))
     }

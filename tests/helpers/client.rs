@@ -1,7 +1,7 @@
-use aws_multipart_upload::client::{hashmap::HashMapClient, OnComplete};
+use aws_multipart_upload::client::{hashmap::HashMapClient, OnUploadAction};
 use aws_multipart_upload::types::{EntityTag, UploadAddress, UploadParams, UploadedParts};
 use aws_multipart_upload::{AwsError, UploadClient};
-use futures::future::BoxFuture;
+use futures::future::{ready, BoxFuture};
 
 use super::TestItem;
 
@@ -40,18 +40,28 @@ impl UploadClient for TestClient {
     }
 }
 
-// Assert on the `OnComplete` implementation's result.
+// Assert on the `OnUploadAction` implementation's result.
 // It checks the number of items written.
 #[derive(Clone, Debug)]
 pub struct CheckRowCount(pub usize);
-// An `OnComplete` to check serialization and row count.
+// An `OnUploadAction` to check serialization and row count.
 #[derive(Debug, Clone)]
 pub struct CheckJsonlines(pub usize);
 
-impl OnComplete<TestClient> for CheckRowCount {
+impl OnUploadAction<TestClient> for CheckRowCount {
+    fn on_upload_part<'a, 'c: 'a>(
+        &'c self,
+        _: &'a TestClient,
+        _: UploadParams,
+        _: EntityTag,
+    ) -> BoxFuture<'a, Result<(), AwsError>> {
+        Box::pin(ready(Ok(())))
+    }
+
     fn on_upload_complete<'a, 'c: 'a>(
         &'c self,
         client: &'a TestClient,
+        _: UploadParams,
         _: EntityTag,
     ) -> BoxFuture<'a, Result<(), AwsError>> {
         Box::pin(async move {
@@ -74,10 +84,20 @@ impl OnComplete<TestClient> for CheckRowCount {
     }
 }
 
-impl OnComplete<TestClient> for CheckJsonlines {
+impl OnUploadAction<TestClient> for CheckJsonlines {
+    fn on_upload_part<'a, 'c: 'a>(
+        &'c self,
+        _: &'a TestClient,
+        _: UploadParams,
+        _: EntityTag,
+    ) -> BoxFuture<'a, Result<(), AwsError>> {
+        Box::pin(ready(Ok(())))
+    }
+
     fn on_upload_complete<'a, 'c: 'a>(
         &'c self,
         client: &'a TestClient,
+        _: UploadParams,
         _: EntityTag,
     ) -> BoxFuture<'a, Result<(), AwsError>> {
         Box::pin(async move {
