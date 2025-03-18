@@ -16,12 +16,15 @@ pub struct AwsClient {
 }
 
 impl AwsClient {
-    pub fn new(config: SdkConfig) -> Self {
-        let s3 = s3::Client::new(&config);
-
+    pub fn new(s3: s3::Client) -> Self {
         Self {
             inner: Arc::new(s3),
         }
+    }
+
+    pub fn new_with(config: SdkConfig) -> Self {
+        let s3 = s3::Client::new(&config);
+        Self::new(s3)
     }
 
     /// Get a reference to the AWS client.
