@@ -14,7 +14,7 @@ pub enum JsonlinesCodecError {
 
 impl From<JsonlinesCodecError> for AwsError {
     fn from(value: JsonlinesCodecError) -> Self {
-        Self::Codec(value.to_string())
+        AwsError::Codec(value.to_string())
     }
 }
 

@@ -16,7 +16,7 @@ pub enum CsvCodecError {
 
 impl From<CsvCodecError> for AwsError {
     fn from(value: CsvCodecError) -> Self {
-        Self::Codec(value.to_string())
+        AwsError::Codec(value.to_string())
     }
 }
 

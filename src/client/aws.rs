@@ -4,14 +4,12 @@ use futures::future::BoxFuture;
 use std::sync::Arc;
 
 use crate::{
-    types::{api::*, UploadClient},
+    client::UploadClient,
+    types::{EntityTag, UploadAddress, UploadId, UploadParams, UploadedParts},
     AwsError,
 };
 
 /// An AWS client for S3 multipart uploads.
-///
-/// It has the required methods of `UploadClient`, a customized version of the
-/// provided `on_complete_upload` can be added for a complete implementation.
 #[derive(Debug, Clone)]
 pub struct AwsClient {
     inner: Arc<s3::Client>,
@@ -33,10 +31,10 @@ impl AwsClient {
 }
 
 impl UploadClient for AwsClient {
-    fn new_upload<'a, 'client: 'a>(
-        &'client self,
+    fn new_upload<'a, 'c: 'a>(
+        &'c self,
         addr: &'a UploadAddress,
-    ) -> BoxFuture<'a, Result<UploadRequestParams, AwsError>> {
+    ) -> BoxFuture<'a, Result<UploadParams, AwsError>> {
         Box::pin(async move {
             let resp = self
                 .inner
@@ -46,15 +44,15 @@ impl UploadClient for AwsClient {
                 .send()
                 .await?;
             let upload_id = UploadId::try_from(resp)?;
-            let params = UploadRequestParams::new(upload_id, addr.clone());
+            let params = UploadParams::new(upload_id, addr.clone());
 
             Ok(params)
         })
     }
 
-    fn upload_part<'a, 'client: 'a>(
-        &'client self,
-        params: &'a UploadRequestParams,
+    fn upload_part<'a, 'c: 'a>(
+        &'c self,
+        params: &'a UploadParams,
         part_number: i32,
         part: ByteStream,
     ) -> BoxFuture<'a, Result<EntityTag, AwsError>> {
@@ -74,9 +72,9 @@ impl UploadClient for AwsClient {
         })
     }
 
-    fn complete_upload<'a, 'client: 'a>(
-        &'client self,
-        params: &'a UploadRequestParams,
+    fn complete_upload<'a, 'c: 'a>(
+        &'c self,
+        params: &'a UploadParams,
         parts: &'a UploadedParts,
     ) -> BoxFuture<'a, Result<EntityTag, AwsError>> {
         Box::pin(async move {
