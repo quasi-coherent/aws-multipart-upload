@@ -1,14 +1,10 @@
 pub mod client;
 pub use self::client::{CheckJsonlines, CheckRowCount, TestClient};
 
-pub mod ctrl;
-use self::ctrl::TestControl;
-
 pub mod message;
 pub use self::message::{TestItem, TestItemStream};
 
-use aws_multipart_upload::api_types::UploadAddress;
-use aws_multipart_upload::{types::UploadClient, AwsError, Upload, UploadBuilder};
+use aws_multipart_upload::{Upload, UploadBuilder, UploadClient, UploadConfig};
 use std::{str::FromStr, sync::LazyLock};
 use tokio_util::codec::Encoder;
 
@@ -20,55 +16,49 @@ pub static TRACER: LazyLock<()> = LazyLock::new(|| {
 });
 
 #[derive(Debug)]
-pub struct TestUpload<U, E> {
-    client: U,
+pub struct TestUpload<T, E> {
+    client: T,
     codec: E,
-    ctrl: TestControl,
+    part_size: usize,
+    buf_size: Option<usize>,
 }
 
-impl<U: Default, E: Default> Default for TestUpload<U, E> {
-    fn default() -> Self {
-        Self {
-            client: U::default(),
-            codec: E::default(),
-            ctrl: TestControl::default(),
-        }
-    }
-}
-
-impl<U, E> TestUpload<U, E>
+impl<T, E> TestUpload<T, E>
 where
-    U: UploadClient + Send + Sync + 'static,
+    T: UploadClient + Send + Sync + 'static,
     E: Encoder<TestItem> + Default,
 {
-    pub fn from_client(client: U) -> Self {
+    pub fn new(client: T) -> Self {
         Self {
             client,
             codec: E::default(),
-            ctrl: TestControl::default(),
+            part_size: 512,
+            buf_size: None,
         }
     }
 
-    pub fn with_codec(mut self, codec: E) -> Self {
-        self.codec = codec;
+    pub fn with_part_size(mut self, size: usize) -> Self {
+        self.part_size = size;
         self
     }
 
-    pub fn with_part_size(mut self, n: usize) -> Self {
-        self.ctrl.part_size = n;
+    pub fn with_buf_size(mut self, size: usize) -> Self {
+        self.buf_size = Some(size);
         self
     }
 
-    pub fn with_upload_size(mut self, n: usize) -> Self {
-        self.ctrl.upload_size = n;
-        self
-    }
+    pub async fn build(self) -> Upload<E> {
+        let mut config = UploadConfig::new().with_min_part_size(self.part_size);
+        if let Some(size) = self.buf_size {
+            config = config.with_buffer_size(size);
+        }
 
-    pub async fn init_upload(self) -> Result<Upload<E>, AwsError> {
-        let builder = UploadBuilder::new(self.client, self.ctrl, self.codec);
-        let sink = builder
-            .init_upload::<TestItem>("doesnt".to_string(), "matter".to_string())
-            .await?;
-        Ok(sink)
+        UploadBuilder::from_client(self.client)
+            .with_encoder(self.codec)
+            .set_config(config)
+            .build("doesnot", "matter")
+            .await
+            .map_err(|e| tracing::error!(error = ?e, "error creating sink"))
+            .unwrap()
     }
 }

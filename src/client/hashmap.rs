@@ -4,12 +4,13 @@ use std::collections::HashMap;
 use tokio::sync::Mutex;
 
 use crate::{
-    types::{api::*, UploadClient},
+    client::UploadClient,
+    types::{EntityTag, UploadAddress, UploadId, UploadParams, UploadedParts},
     AwsError,
 };
 
 /// For testing, a client that writes a part `n` with data `bytes` as the entry
-/// `(n, bytes)` in a hash map.
+/// `(n: i32, bytes: Vec<u8>)` in a hash map.
 #[derive(Debug)]
 pub struct HashMapClient {
     store: Mutex<HashMap<i32, Vec<u8>>>,
@@ -39,7 +40,7 @@ impl HashMapClient {
 impl UploadClient for HashMapClient {
     fn upload_part<'a, 'c: 'a>(
         &'c self,
-        params: &'a UploadRequestParams,
+        params: &'a UploadParams,
         part_number: i32,
         part: ByteStream,
     ) -> BoxFuture<'a, Result<EntityTag, AwsError>> {
@@ -58,18 +59,18 @@ impl UploadClient for HashMapClient {
     fn new_upload<'a, 'c: 'a>(
         &'c self,
         addr: &'a UploadAddress,
-    ) -> BoxFuture<'a, Result<UploadRequestParams, AwsError>> {
+    ) -> BoxFuture<'a, Result<UploadParams, AwsError>> {
         let upload_id = UploadId::from(addr.key().to_string());
-        Box::pin(ready(Ok(UploadRequestParams::new(upload_id, addr.clone()))))
+        Box::pin(ready(Ok(UploadParams::new(upload_id, addr.clone()))))
     }
 
     // This is not meaningful for this client.
     fn complete_upload<'a, 'c: 'a>(
         &'c self,
-        params: &'a UploadRequestParams,
+        params: &'a UploadParams,
         parts: &'a UploadedParts,
     ) -> BoxFuture<'a, Result<EntityTag, AwsError>> {
-        let etag = EntityTag::from(format!("{}_{}", params.key(), parts.last_completed()));
+        let etag = EntityTag::from(format!("{}_{}", params.key(), parts.last_part_number()));
         Box::pin(ready(Ok(etag)))
     }
 }

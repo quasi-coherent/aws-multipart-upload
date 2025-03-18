@@ -1,6 +1,6 @@
-use aws_multipart_upload::client::OnComplete;
-use aws_multipart_upload::types::UploadClient;
-use aws_multipart_upload::{api_types::*, testing::HashMapClient, AwsError};
+use aws_multipart_upload::client::{hashmap::HashMapClient, OnComplete};
+use aws_multipart_upload::types::{EntityTag, UploadAddress, UploadParams, UploadedParts};
+use aws_multipart_upload::{AwsError, UploadClient};
 use futures::future::BoxFuture;
 
 use super::TestItem;
@@ -14,11 +14,41 @@ impl TestClient {
     }
 }
 
+impl UploadClient for TestClient {
+    fn new_upload<'a, 'client: 'a>(
+        &'client self,
+        addr: &'a UploadAddress,
+    ) -> BoxFuture<'a, Result<UploadParams, AwsError>> {
+        self.0.new_upload(addr)
+    }
+
+    fn upload_part<'a, 'client: 'a>(
+        &'client self,
+        params: &'a UploadParams,
+        part_number: i32,
+        part: aws_sdk_s3::primitives::ByteStream,
+    ) -> BoxFuture<'a, Result<EntityTag, AwsError>> {
+        self.0.upload_part(params, part_number, part)
+    }
+
+    fn complete_upload<'a, 'client: 'a>(
+        &'client self,
+        params: &'a UploadParams,
+        parts: &'a UploadedParts,
+    ) -> BoxFuture<'a, Result<EntityTag, AwsError>> {
+        self.0.complete_upload(params, parts)
+    }
+}
+
+// Assert on the `OnComplete` implementation's result.
+// It checks the number of items written.
 #[derive(Clone, Debug)]
 pub struct CheckRowCount(pub usize);
+// An `OnComplete` to check serialization and row count.
+#[derive(Debug, Clone)]
+pub struct CheckJsonlines(pub usize);
 
 impl OnComplete<TestClient> for CheckRowCount {
-    /// Callback on a CSV upload to check that the number of rows is correct.
     fn on_upload_complete<'a, 'c: 'a>(
         &'c self,
         client: &'a TestClient,
@@ -43,9 +73,6 @@ impl OnComplete<TestClient> for CheckRowCount {
         })
     }
 }
-
-#[derive(Debug, Clone)]
-pub struct CheckJsonlines(pub usize);
 
 impl OnComplete<TestClient> for CheckJsonlines {
     fn on_upload_complete<'a, 'c: 'a>(
@@ -75,31 +102,5 @@ impl OnComplete<TestClient> for CheckJsonlines {
                 Ok(())
             }
         })
-    }
-}
-
-impl UploadClient for TestClient {
-    fn new_upload<'a, 'client: 'a>(
-        &'client self,
-        addr: &'a UploadAddress,
-    ) -> BoxFuture<'a, Result<UploadRequestParams, AwsError>> {
-        self.0.new_upload(addr)
-    }
-
-    fn upload_part<'a, 'client: 'a>(
-        &'client self,
-        params: &'a UploadRequestParams,
-        part_number: i32,
-        part: aws_sdk_s3::primitives::ByteStream,
-    ) -> BoxFuture<'a, Result<EntityTag, AwsError>> {
-        self.0.upload_part(params, part_number, part)
-    }
-
-    fn complete_upload<'a, 'client: 'a>(
-        &'client self,
-        params: &'a UploadRequestParams,
-        parts: &'a UploadedParts,
-    ) -> BoxFuture<'a, Result<EntityTag, AwsError>> {
-        self.0.complete_upload(params, parts)
     }
 }
