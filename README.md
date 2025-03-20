@@ -10,8 +10,7 @@
 
 ## Description
 
-First version of a crate with `futures::Sink`s for doing an AWS S3 multipart upload using the official
-[SDK](https://docs.rs/aws-sdk-s3/latest/aws_sdk_s3/index.html).
+A crate in alpha with a `futures::Sink` for doing AWS S3 multipart uploads with the official [SDK][sdk]
 
 Current:
 * `Upload`: For the finite case, send items to `Upload` until they are exhausted or the (optional)
@@ -19,9 +18,7 @@ Current:
   send more items after an upload is an error.  For this reason, it's probably not a good idea to
   configure it with a target upload size, unless it's really a "maximum upload size" and a very safe
   upper bound on the total bytes.
+  - The `Upload` sink can also start a new upload to address the write-after-upload error by calling
+    `poll_new_upload`.
 
-Development:
-* `UploadForever`: For the infinite case, `UploadForever` uses an iterator of S3 addresses to
-  continuously build and upload parts, complete uploads when the target upload size is achieved, and
-  then start new uploads from the `next` address iterator.  If `next` returns `None`, this is an
-  error.
+[sdk]: https://docs.rs/aws-sdk-s3/latest/aws_sdk_s3/index.html
