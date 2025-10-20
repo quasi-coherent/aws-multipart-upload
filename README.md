@@ -10,7 +10,7 @@
 
 ## Description
 
-A crate in alpha with a `futures::Sink` for doing AWS S3 multipart uploads with the official [SDK][sdk]
+A crate in alpha with a `futures::Sink` for doing AWS S3 multipart uploads with the official [SDK][sdk].
 
 Current:
 * `Upload`: For the finite case, send items to `Upload` until they are exhausted or the (optional)
