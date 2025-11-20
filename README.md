@@ -10,6 +10,7 @@
 
 # Description
 
-A high-level crate for building AWS S3 multipart uploads using the official [SDK] for Rust.
+A high-level crate for building and working with AWS S3 multipart uploads using the official [SDK]
+for Rust.
 
 [SDK]: https://awslabs.github.io/aws-sdk-rust/

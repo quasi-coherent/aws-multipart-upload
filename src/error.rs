@@ -1,45 +1,59 @@
-//! Errors this crate can emit.
+//! Types for working with errors.
+use crate::client::UploadId;
+use crate::client::part::PartNumber;
 use crate::codec::{EncodeError, EncodeErrorKind};
-use crate::complete_upload::CompleteMultipartUploadError;
-use crate::create_upload::CreateMultipartUploadError;
-use crate::sdk::{CompletedParts, ObjectUri, PartNumber, UploadId};
-use crate::upload_part::UploadPartError;
+use crate::uri::ObjectUri;
 
-use aws_sdk_s3::error::SdkError;
+use aws_sdk::error::SdkError;
+use std::error::Error as StdError;
 use std::fmt::{self, Display, Formatter};
 
-/// A specialized `Result` type for this crate.
+/// A specialized `Result` type for errors originating in this crate.
 pub type Result<T, E = Error> = ::std::result::Result<T, E>;
 
-/// The value returned in this crate when an error occurs.
+/// The value returned when some operation in this crate fails.
 #[derive(Debug, thiserror::Error)]
-#[error(transparent)]
 pub struct Error(pub(crate) ErrorRepr);
 
 impl Error {
+    /// Returns the details of the upload that failed if available.
+    pub fn failed_upload(&self) -> Option<&FailedUpload> {
+        if let ErrorRepr::UploadFailed { failed, .. } = &self.0 {
+            return Some(failed);
+        }
+        None
+    }
+
+    /// Returns the category under which this error falls.
     pub fn kind(&self) -> ErrorKind {
         match self.0 {
-            ErrorRepr::Create { .. }
-            | ErrorRepr::UploadPart { .. }
-            | ErrorRepr::Complete { .. } => ErrorKind::Sdk,
+            ErrorRepr::Sdk(_) => ErrorKind::Sdk,
             ErrorRepr::Missing(_, _) => ErrorKind::Config,
             ErrorRepr::Encoding(_, _) => ErrorKind::Encoding,
-            ErrorRepr::MissingNextUri | ErrorRepr::UploadStillActive => ErrorKind::Write,
-            ErrorRepr::StdDyn(_) => ErrorKind::Unknown,
-            ErrorRepr::Any { kind, .. } => kind,
+            ErrorRepr::UploadFailed { .. } => ErrorKind::Upload,
+            ErrorRepr::DynStd(_) => ErrorKind::Unknown,
+            ErrorRepr::Other { kind, .. } => kind,
         }
     }
 
-    pub fn from_dyn<E>(e: E) -> Self
+    /// Convert an arbitrary [`std::error::Error`] to this error type.
+    pub fn from_dyn_std<E>(e: E) -> Self
     where
-        E: std::error::Error + Send + Sync + 'static,
+        E: StdError + 'static,
     {
         let err = Box::new(e);
-        Self(ErrorRepr::StdDyn(err))
+        Self(ErrorRepr::DynStd(err))
     }
 
-    pub fn from_kind(kind: ErrorKind, msg: &'static str) -> Self {
-        Self(ErrorRepr::Any { kind, msg })
+    /// Create this error from a category and message.
+    pub fn other(kind: ErrorKind, msg: &'static str) -> Self {
+        Self(ErrorRepr::Other { kind, msg })
+    }
+}
+
+impl Display for Error {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
     }
 }
 
@@ -59,10 +73,15 @@ impl<E: EncodeError> From<E> for Error {
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
 pub enum ErrorKind {
+    /// There was an error in configuration.
     Config,
+    /// There was an error encoding an item in a part.
     Encoding,
+    /// An error was returned by the underlying SDK.
     Sdk,
-    Write,
+    /// There was an error operating the upload.
+    Upload,
+    /// The origin of the error is not known.
     Unknown,
 }
 
@@ -72,82 +91,99 @@ impl Display for ErrorKind {
             Self::Config => write!(f, "config"),
             Self::Encoding => write!(f, "encoding"),
             Self::Sdk => write!(f, "sdk"),
-            Self::Write => write!(f, "write"),
+            Self::Upload => write!(f, "upload"),
             Self::Unknown => write!(f, "unknown"),
         }
     }
 }
 
-/// Internal error type that we are free to change at will.
+/// The data of an upload that failed.
+///
+/// This may be found using [`Error::failed_upload`] on the error returned by
+/// some operation.
+///
+/// The data is what would be required to resume a multipart upload or abort it.
+#[derive(Debug, Clone)]
+pub struct FailedUpload {
+    /// The ID of the upload assigned on creation.
+    pub id: UploadId,
+    /// The destination URI of the upload.
+    pub uri: ObjectUri,
+    /// The part number that was in progress when the error occurred.
+    pub part: PartNumber,
+}
+
+impl FailedUpload {
+    pub(crate) fn new(id: &UploadId, uri: &ObjectUri, part: PartNumber) -> Self {
+        Self {
+            id: id.clone(),
+            uri: uri.clone(),
+            part,
+        }
+    }
+}
+
+impl Display for FailedUpload {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            r#"{{ "id": "{}", "uri": "{}", "part": "{}" }}"#,
+            &self.id, &self.uri, self.part
+        )
+    }
+}
+
+/// Appending upload data to the error if available.
+pub(crate) trait UploadContext<T> {
+    fn upload_ctx(self, id: &UploadId, uri: &ObjectUri, part: PartNumber) -> Result<T>;
+}
+
+impl<T, E> UploadContext<T> for Result<T, E>
+where
+    E: StdError + 'static,
+{
+    fn upload_ctx(self, id: &UploadId, uri: &ObjectUri, part: PartNumber) -> Result<T> {
+        match self {
+            Ok(t) => Ok(t),
+            Err(e) => {
+                let failed = FailedUpload::new(id, uri, part);
+                let err = ErrorRepr::UploadFailed {
+                    failed,
+                    source: Box::new(e),
+                };
+                Err(err.into())
+            }
+        }
+    }
+}
+
+/// Internal error representation.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ErrorRepr {
     #[error("{0} missing required field: {1}")]
     Missing(&'static str, &'static str),
     #[error("encoding error: {0} {1}")]
     Encoding(String, EncodeErrorKind),
-    #[error("cannot start new upload while previous upload active")]
-    UploadStillActive,
-    #[error("could not start new upload, missing object uri")]
-    MissingNextUri,
-    #[error("creating multipart upload failed: {source}")]
-    Create {
-        uri: ObjectUri,
-        source: Box<dyn std::error::Error + Send + Sync + 'static>,
+    #[error("upload failed: {failed}: {source}")]
+    UploadFailed {
+        failed: FailedUpload,
+        source: Box<dyn StdError>,
     },
-    #[error("uploading {part} to upload {id} failed: {source}")]
-    UploadPart {
-        id: UploadId,
-        uri: ObjectUri,
-        part: PartNumber,
-        source: Box<dyn std::error::Error + Send + Sync + 'static>,
-    },
-    #[error("completing upload {id} failed: {source}")]
-    Complete {
-        id: UploadId,
-        uri: ObjectUri,
-        parts: CompletedParts,
-        source: Box<dyn std::error::Error + Send + Sync + 'static>,
-    },
+    #[error("error from aws_sdk: {0}")]
+    Sdk(#[source] Box<dyn StdError>),
     #[error("{kind} error: {msg}")]
-    Any { kind: ErrorKind, msg: &'static str },
+    Other { kind: ErrorKind, msg: &'static str },
     #[error(transparent)]
-    StdDyn(Box<dyn std::error::Error + Send + Sync + 'static>),
+    DynStd(Box<dyn StdError>),
 }
 
-impl ErrorRepr {
-    pub(crate) fn from_create_err(
-        uri: &ObjectUri,
-    ) -> impl FnMut(SdkError<CreateMultipartUploadError>) -> Self {
-        move |e| Self::Create {
-            uri: uri.clone(),
-            source: Box::new(e),
-        }
-    }
-
-    pub(crate) fn from_upload_err(
-        id: &UploadId,
-        uri: &ObjectUri,
-        part: PartNumber,
-    ) -> impl FnMut(SdkError<UploadPartError>) -> Self {
-        move |e| Self::UploadPart {
-            id: id.clone(),
-            uri: uri.clone(),
-            part,
-            source: Box::new(e),
-        }
-    }
-
-    pub(crate) fn from_complete_err(
-        id: &UploadId,
-        uri: &ObjectUri,
-        parts: &CompletedParts,
-    ) -> impl FnMut(SdkError<CompleteMultipartUploadError>) -> Self {
-        move |e| Self::Complete {
-            id: id.clone(),
-            uri: uri.clone(),
-            parts: parts.clone(),
-            source: Box::new(e),
-        }
+impl<E, R> From<SdkError<E, R>> for ErrorRepr
+where
+    E: StdError + 'static,
+    R: std::fmt::Debug + 'static,
+{
+    fn from(value: SdkError<E, R>) -> Self {
+        Self::Sdk(Box::new(value))
     }
 }
 

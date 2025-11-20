@@ -1,69 +1,55 @@
-use crate::client::SendUploadPart;
+use crate::client::part::CompletedParts;
+use crate::client::request::SendUploadPart;
 use crate::error::{Error as UploadError, Result};
-use crate::sdk::CompletedParts;
-use crate::upload::UnitReturn;
 
 use futures::stream::FuturesUnordered;
 use futures::{Stream, ready};
-use multipart_write::prelude::*;
+use multipart_write::MultipartWrite;
 use std::fmt::{self, Debug, Formatter};
 use std::num::NonZeroUsize;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-/// `PartBuf` is a multipart writer whose write operation is to push to a buffer
-/// of part upload request futures.  Flushing this writer will await the buffer
-/// until all part uploads have finished.
-///
-/// Calling `poll_complete` returns the successfully completed part uploads in
-/// the output [`CompletedParts`].
+/// Writer maintaining an inner buffer of upload part request futures.
 #[must_use = "futures do nothing unless polled"]
 #[pin_project::pin_project]
-pub struct PartBuf {
+pub struct PartBuffer {
     #[pin]
     pending: FuturesUnordered<SendUploadPart>,
     completed: CompletedParts,
     capacity: Option<NonZeroUsize>,
 }
 
-impl Default for PartBuf {
-    fn default() -> Self {
+impl PartBuffer {
+    pub(crate) fn new(capacity: Option<usize>) -> Self {
         Self {
             pending: FuturesUnordered::new(),
             completed: CompletedParts::default(),
-            capacity: None,
+            capacity: capacity.and_then(NonZeroUsize::new),
         }
     }
 }
 
-impl PartBuf {
-    /// Create a new default part upload buffer.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Create a `PartBuf` with capacity `capacity`.
-    pub fn with_capacity<T: Into<Option<usize>>>(capacity: T) -> Self {
-        Self {
-            pending: FuturesUnordered::new(),
-            completed: CompletedParts::default(),
-            capacity: capacity.into().and_then(NonZeroUsize::new),
-        }
-    }
-}
-
-impl MultipartWrite<SendUploadPart> for PartBuf {
-    type Ret = UnitReturn;
+impl MultipartWrite<SendUploadPart> for PartBuffer {
+    type Ret = ();
     type Output = CompletedParts;
     type Error = UploadError;
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<()>> {
         let mut this = self.project();
-
         // Poke the pending uploads to see if any are ready.
         while let Poll::Ready(Some(res)) = this.pending.as_mut().poll_next(cx) {
             match res {
-                Ok(v) => this.completed.push(v),
+                Ok(v) => {
+                    trace!(
+                        id = %v.id,
+                        etag = %v.etag,
+                        part = ?v.part_number,
+                        size = v.part_size,
+                        "completed part",
+                    );
+                    this.completed.push(v)
+                }
                 Err(e) => return Poll::Ready(Err(e)),
             }
         }
@@ -76,15 +62,21 @@ impl MultipartWrite<SendUploadPart> for PartBuf {
 
     fn start_send(mut self: Pin<&mut Self>, part: SendUploadPart) -> Result<Self::Ret> {
         self.as_mut().pending.push(part);
-        Ok(UnitReturn)
+        Ok(())
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<()>> {
         let mut this = self.project();
-
         while !this.pending.is_empty() {
             match ready!(this.pending.as_mut().poll_next(cx)) {
                 Some(Ok(v)) => {
+                    trace!(
+                        id = %v.id,
+                        etag = %v.etag,
+                        part = ?v.part_number,
+                        size = v.part_size,
+                        "flushed completed part",
+                    );
                     this.completed.push(v);
                 }
                 Some(Err(e)) => return Poll::Ready(Err(e)),
@@ -95,17 +87,15 @@ impl MultipartWrite<SendUploadPart> for PartBuf {
         Poll::Ready(Ok(()))
     }
 
-    fn poll_complete(
-        mut self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
-    ) -> Poll<Result<Self::Output>> {
+    fn poll_complete(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<Self::Output>> {
+        ready!(self.as_mut().poll_flush(cx))?;
         Poll::Ready(Ok(std::mem::take(&mut self.completed)))
     }
 }
 
-impl Debug for PartBuf {
+impl Debug for PartBuffer {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_struct("PartBuf")
+        f.debug_struct("PartBuffer")
             .field("pending", &self.pending)
             .field("completed", &self.completed)
             .field("capacity", &self.capacity)

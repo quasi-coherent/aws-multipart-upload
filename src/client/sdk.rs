@@ -1,31 +1,42 @@
-use super::{NullRequestBuilder, RequestBuilder, SendRequest};
-use crate::error::{ErrorRepr, Result};
-use crate::sdk::api::*;
-use crate::sdk::*;
+use crate::client::part::{CompletedPart, EntityTag};
+use crate::client::request::*;
+use crate::client::{DefaultRequestBuilder, RequestBuilder, SendRequest, UploadData, UploadId};
+use crate::error::{ErrorRepr, Result, UploadContext as _};
 
-use aws_config::SdkConfig;
-use aws_sdk_s3 as s3;
+use aws_config::ConfigLoader;
 
-/// S3 [`Client`] type from the AWS SDK.
+/// AWS S3 SDK client.
 ///
-/// [`Client`]: aws_sdk_s3::Client
+/// Pairs a [`Client`] with a [`RequestBuilder`] used to set additional
+/// properties on request objects before sending.
+///
+/// [`Client`]: aws_sdk::Client
+/// [`RequestBuilder`]: super::request::RequestBuilder
 #[derive(Debug, Clone)]
-pub struct SdkClient<B = NullRequestBuilder>(s3::Client, B);
+pub struct SdkClient<B = DefaultRequestBuilder>(aws_sdk::Client, B);
 
 impl SdkClient {
-    /// Create a new `SdkClient` from an existing SDK `Client`.
+    /// Create a new `SdkClient` with default [`RequestBuilder`].
     ///
-    /// [`Client`]: aws_sdk_s3::Client
-    pub fn new(client: s3::Client) -> Self {
-        SdkClient(client, NullRequestBuilder)
+    /// [`RequestBuilder`]: super::request::RequestBuilder
+    pub fn new(client: aws_sdk::Client) -> Self {
+        SdkClient(client, DefaultRequestBuilder)
     }
 
-    /// Create a new `SdkClient` from an [`SdkConfig`].
+    /// Create a new `SdkClient` from the supplied [`ConfigLoader`].
     ///
-    /// [`SdkConfig`]: aws_config::SdkConfig
-    pub fn from_sdk_config(config: SdkConfig) -> Self {
-        let client = s3::Client::new(&config);
+    /// [`ConfigLoader`]: aws_config::ConfigLoader
+    pub async fn from_config(loader: ConfigLoader) -> Self {
+        let config = loader.load().await;
+        let client = aws_sdk::Client::new(&config);
         Self::new(client)
+    }
+
+    /// Create a new `SdkClient` with default [`RequestBuilder`] using the
+    /// default [`ConfigLoader`].
+    pub async fn defaults() -> Self {
+        let loader = aws_config::from_env();
+        Self::from_config(loader).await
     }
 
     /// Set a request builder for this S3 client.
@@ -52,6 +63,12 @@ impl<B: RequestBuilder> SdkClient<B> {
     pub(crate) fn new_complete_builder(&self) -> CompleteRequestBuilder {
         self.0.complete_multipart_upload()
     }
+
+    /// Create a default `CompleteRequestBuilder` to set properties on for a
+    /// `CompleteMultipartUpload` request.
+    pub(crate) fn new_abort_builder(&self) -> AbortRequestBuilder {
+        self.0.abort_multipart_upload()
+    }
 }
 
 impl<B: RequestBuilder> SendRequest for SdkClient<B> {
@@ -65,8 +82,8 @@ impl<B: RequestBuilder> SendRequest for SdkClient<B> {
         let id = request
             .send()
             .await
-            .map_err(ErrorRepr::from_create_err(uri))
-            .and_then(UploadId::try_from_create_resp)?;
+            .map_err(ErrorRepr::from)
+            .and_then(|resp| UploadId::try_from_create_resp(&resp))?;
 
         Ok(UploadData::new(id, uri.clone()))
     }
@@ -88,10 +105,11 @@ impl<B: RequestBuilder> SendRequest for SdkClient<B> {
         let etag = request
             .send()
             .await
-            .map_err(ErrorRepr::from_upload_err(id, uri, part))
-            .and_then(EntityTag::try_from_upload_resp)?;
+            .map_err(ErrorRepr::from)
+            .and_then(|resp| EntityTag::try_from_upload_resp(&resp))
+            .upload_ctx(id, uri, part)?;
 
-        Ok(CompletedPart::new(etag, part, part_size))
+        Ok(CompletedPart::new(id.clone(), etag, part, part_size))
     }
 
     async fn send_complete_upload_request(&self, req: CompleteRequest) -> Result<CompletedUpload> {
@@ -102,13 +120,22 @@ impl<B: RequestBuilder> SendRequest for SdkClient<B> {
 
         let id = req.id();
         let uri = req.uri();
-        let parts = req.completed_parts();
+        let part = req.completed_parts.max_part_number();
         let etag = request
             .send()
             .await
-            .map_err(ErrorRepr::from_complete_err(id, uri, parts))
-            .and_then(EntityTag::try_from_complete_resp)?;
+            .map_err(ErrorRepr::from)
+            .and_then(|resp| EntityTag::try_from_complete_resp(&resp))
+            .upload_ctx(id, uri, part)?;
 
         Ok(CompletedUpload::new(uri.clone(), etag))
+    }
+
+    async fn send_abort_upload_request(&self, req: AbortRequest) -> Result<()> {
+        let base = self.new_abort_builder();
+        let builder = req.with_builder(base);
+        let request = self.1.with_abort_builder(builder);
+        let _ = request.send().await.map_err(ErrorRepr::from)?;
+        Ok(())
     }
 }

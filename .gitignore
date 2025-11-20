@@ -2,3 +2,4 @@ target/
 .dir-locals.el
 .envrc
 .direnv/
+examples/mockstore/

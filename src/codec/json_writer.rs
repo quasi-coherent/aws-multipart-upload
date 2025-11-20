@@ -1,58 +1,51 @@
-use crate::codec::{EncodeError, EncodeErrorKind, EncodedPart};
-use crate::config::DEFAULT_MAX_PART_SIZE;
+use crate::client::part::PartBody;
+use crate::codec::PartEncoder;
 
-use crate::sdk::PartBody;
-
+use bytes::BufMut as _;
 use serde::Serialize;
-use std::io::Write;
+use std::ops::DerefMut;
 
-/// `JsonLinesEncoder` implements [`EncodedPart`] by writing lines of JSON to
-/// the part.
+/// Builder for `JsonLinesEncoder`.
+#[derive(Debug, Clone, Default)]
+pub struct JsonLinesBuilder;
+
+impl JsonLinesBuilder {
+    fn build(&self, part_size: usize) -> JsonLinesEncoder {
+        JsonLinesEncoder {
+            writer: PartBody::with_capacity(part_size),
+        }
+    }
+}
+
+/// `JsonLinesEncoder` implements `PartEncoder` by writing lines of JSON to the
+/// part.
 #[derive(Debug, Clone)]
 pub struct JsonLinesEncoder {
     writer: PartBody,
 }
 
-impl JsonLinesEncoder {
-    /// Create a new `JsonLinesEncoder` with part capacity.
-    /// The default capacity is 10MiB.
-    pub fn new(capacity: impl Into<Option<usize>>) -> Self {
-        let capacity = capacity.into().unwrap_or(DEFAULT_MAX_PART_SIZE);
-        Self {
-            writer: PartBody::with_capacity(capacity),
-        }
+impl<Item: Serialize> PartEncoder<Item> for JsonLinesEncoder {
+    type Builder = JsonLinesBuilder;
+    type Error = serde_json::Error;
+
+    fn build(builder: &Self::Builder, part_size: usize) -> Result<Self, Self::Error> {
+        Ok(builder.build(part_size))
     }
-}
 
-impl<Item: Serialize> EncodedPart<Item> for JsonLinesEncoder {
-    type Error = std::io::Error;
-
-    fn encode(&mut self, item: Item) -> Result<(), Self::Error> {
-        serde_json::to_writer(&mut self.writer, &item)?;
-        self.writer.write(b"\n")?;
-        Ok(())
+    fn encode(&mut self, item: Item) -> Result<usize, Self::Error> {
+        let it = serde_json::to_vec(&item)?;
+        let bytes = it.len();
+        self.writer.deref_mut().reserve(bytes + 1);
+        self.writer.deref_mut().put(it.as_ref());
+        self.writer.deref_mut().put_u8(b'\n');
+        Ok(bytes + 1)
     }
 
     fn flush(&mut self) -> Result<(), Self::Error> {
         Ok(())
     }
 
-    fn current_size(&self) -> usize {
-        self.writer.size()
-    }
-
-    fn to_part_body(&mut self) -> Result<PartBody, Self::Error> {
-        let inner = self.writer.split();
-        Ok(PartBody::new(inner))
-    }
-}
-
-impl EncodeError for std::io::Error {
-    fn message(&self) -> String {
-        self.to_string()
-    }
-
-    fn kind(&self) -> EncodeErrorKind {
-        EncodeErrorKind::Io
+    fn into_body(self) -> Result<PartBody, Self::Error> {
+        Ok(self.writer)
     }
 }
