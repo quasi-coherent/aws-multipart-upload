@@ -10,7 +10,7 @@ use std::num::NonZeroUsize;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-/// Writer maintaining an inner buffer of upload part request futures.
+/// Utility `MultipartWrite` for buffering upload request futures.
 #[must_use = "futures do nothing unless polled"]
 #[pin_project::pin_project]
 pub struct PartBuffer {

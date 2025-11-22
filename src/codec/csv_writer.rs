@@ -10,26 +10,29 @@ pub struct CsvBuilder;
 
 impl CsvBuilder {
     fn build(&self, part_size: usize) -> CsvEncoder {
-        let mut builder = WriterBuilder::new();
-        let body = PartBody::with_capacity(part_size);
-        let writer = builder.buffer_capacity(part_size).from_writer(body);
-        CsvEncoder { writer }
+        let writer = PartBody::with_capacity(part_size);
+        CsvEncoder {
+            writer,
+            write_header: true,
+        }
     }
 
     fn reset(&self, part_size: usize) -> CsvEncoder {
-        let mut builder = WriterBuilder::new();
-        let body = PartBody::with_capacity(part_size);
+        let writer = PartBody::with_capacity(part_size);
         // Don't add a header--this is a part of the same object and we wrote a
         // header row in the first part.
-        let writer = builder.has_headers(false).from_writer(body);
-        CsvEncoder { writer }
+        CsvEncoder {
+            writer,
+            write_header: false,
+        }
     }
 }
 
 /// `CsvEncoder` implements `PartEncoder` by writing items to the part in CSV
 /// format.
 pub struct CsvEncoder {
-    writer: Writer<PartBody>,
+    writer: PartBody,
+    write_header: bool,
 }
 
 impl<Item: Serialize> PartEncoder<Item> for CsvEncoder {
@@ -41,14 +44,23 @@ impl<Item: Serialize> PartEncoder<Item> for CsvEncoder {
     }
 
     fn encode(&mut self, item: Item) -> Result<usize, Self::Error> {
-        let before = self.writer.get_ref().size();
-        self.writer.serialize(item)?;
-        let after = self.writer.get_ref().size();
+        let before = self.writer.size();
+        if self.write_header {
+            self.write_header = false;
+            let mut wtr = Writer::from_writer(&mut self.writer);
+            wtr.serialize(item)?;
+            wtr.flush()?;
+        } else {
+            let mut builder = WriterBuilder::new();
+            let mut wtr = builder.has_headers(false).from_writer(&mut self.writer);
+            wtr.serialize(item)?;
+            wtr.flush()?;
+        }
+        let after = self.writer.size();
         Ok(after - before)
     }
 
     fn flush(&mut self) -> Result<(), Self::Error> {
-        self.writer.flush()?;
         Ok(())
     }
 
@@ -57,10 +69,7 @@ impl<Item: Serialize> PartEncoder<Item> for CsvEncoder {
     }
 
     fn into_body(self) -> Result<PartBody, Self::Error> {
-        Ok(self
-            .writer
-            .into_inner()
-            .map_err(csv::IntoInnerError::into_error)?)
+        Ok(self.writer)
     }
 }
 

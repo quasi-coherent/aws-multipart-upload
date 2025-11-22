@@ -5,6 +5,8 @@
 //! upload request body.
 use crate::client::part::PartBody;
 
+use bytes::BufMut;
+
 #[cfg(feature = "csv")]
 #[cfg_attr(docsrs, doc(cfg(feature = "csv")))]
 mod csv_writer;
@@ -61,4 +63,29 @@ pub trait PartEncoder<Item> {
 
     /// Convert the encoder to a `PartBody`.
     fn into_body(self) -> Result<PartBody, Self::Error>;
+}
+
+impl<T: AsRef<[u8]>> PartEncoder<T> for PartBody {
+    type Builder = ();
+    type Error = std::convert::Infallible;
+
+    fn build(_: &Self::Builder, part_size: usize) -> Result<Self, Self::Error> {
+        Ok(Self::with_capacity(part_size))
+    }
+
+    fn encode(&mut self, item: T) -> Result<usize, Self::Error> {
+        let buf = item.as_ref();
+        let bytes = buf.len();
+        self.reserve(bytes);
+        self.put(buf);
+        Ok(bytes)
+    }
+
+    fn flush(&mut self) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    fn into_body(self) -> Result<PartBody, Self::Error> {
+        Ok(self)
+    }
 }

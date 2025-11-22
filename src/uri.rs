@@ -15,26 +15,26 @@
 //! current date and time.
 //!
 //! ```rust
-//! use aws_multipart_upload::NewObjectUri;
-//! use aws_multipart_upload::uri::{Bucket, KeyPrefix, ObjectUriIterExt as _};
+//! use aws_multipart_upload::{Bucket, Key, KeyPrefix, NewObjectUri};
+//! use aws_multipart_upload::uri::ObjectUriIterExt as _;
 //!
 //! const BUCKET: &str = "my-bucket";
 //! const PREFIX: &str = "static/object/prefix";
-//! let base = std::iter::repeat_with(|| (Bucket::from(BUCKET), KeyPrefix::from(PREFIX)));
 //!
-//! // The closure returns a key prefix given another.
-//! // The `ObjectUri` produced by the resulting iterator has a UUID
-//! // as the root of the object underneath this prefix.
-//! let iter = base.map_prefix_with_ext("csv", |prefix| {
-//!     let dt = chrono::Utc::now().format("%Y/%m/%d/%H").to_string();
-//!     prefix.append(KeyPrefix::from(dt))
+//! let iter_pfx = std::iter::repeat_with(|| KeyPrefix::from(PREFIX));
+//! let iter = iter_pfx.map_key(BUCKET, |prefix| {
+//!     let now = chrono::Utc::now();
+//!     let now_str = now.format("%Y/%m/%d/%H").to_string();
+//!     let us = now.timestamp_micros();
+//!     let root = format!("{now_str}/{us}.csv")
+//!     prefix.to_key(&root)
 //! });
 //!
 //! let mut uri = NewObjectUri::uri_iter(iter);
 //! let new_uri = uri.new_uri().unwrap();
 //!
 //! println!("{new_uri}");
-//! // "s3://my-bucket/static/object/prefix/2025/11/11/11/01/019a99b3-b5d7-79d2-bb26-11672809851e.csv"
+//! // "s3://my-bucket/static/object/prefix/2025/11/11/11/01/1763683634194850.csv"
 //! ```
 //! [`NewObjectUri`]: super::NewObjectUri
 use crate::client::UploadClient;
@@ -260,38 +260,17 @@ impl fmt::Debug for NewObjectUri {
     }
 }
 
-/// Extension with `Iterator`s over `ObjectUri`.
+/// Adds the method `map_key` to iterators over `KeyPrefix`.
 pub trait ObjectUriIterExt: Iterator {
     /// Returns an iterator of `ObjectUri` by applying the function `F` to each
     /// `KeyPrefix` to produce the object `Key`.
-    fn map_key<F>(self, f: F) -> MapKey<Self, F>
+    fn map_key<B, F>(self, bucket: B, f: F) -> MapKey<Self, F>
     where
-        Self: Iterator<Item = (Bucket, KeyPrefix)> + Sized,
+        Self: Iterator<Item = KeyPrefix> + Sized,
         F: FnMut(KeyPrefix) -> Key,
+        B: Into<Bucket>,
     {
-        MapKey::new(self, f)
-    }
-
-    /// `ObjectUri` iterator with a UUID object key root and optional extension
-    /// obtained by applying `F` to each `KeyPrefix` to produce the parent prefix
-    /// of the object.
-    fn map_prefix<F>(self, f: F) -> MapPrefix<Self, F>
-    where
-        Self: Iterator<Item = (Bucket, KeyPrefix)> + Sized,
-        F: FnMut(KeyPrefix) -> KeyPrefix,
-    {
-        MapPrefix::new(self, f, None)
-    }
-
-    /// Same as [`map_prefix`](ObjectUriIterExt::map_prefix) with an extension to
-    /// add to the root of the key.
-    fn map_prefix_with_ext<T, F>(self, ext: T, f: F) -> MapPrefix<Self, F>
-    where
-        Self: Iterator<Item = (Bucket, KeyPrefix)> + Sized,
-        T: Into<String>,
-        F: FnMut(KeyPrefix) -> KeyPrefix,
-    {
-        MapPrefix::new(self, f, Some(ext.into()))
+        MapKey::new(self, bucket, f)
     }
 }
 
@@ -299,61 +278,32 @@ impl<I: Iterator> ObjectUriIterExt for I {}
 
 /// Iterator for [`map_key`](ObjectUriIterExt::map_key).
 pub struct MapKey<I, F> {
+    bucket: Bucket,
     inner: I,
     f: F,
 }
 
 impl<I, F> MapKey<I, F> {
-    fn new(inner: I, f: F) -> Self {
-        Self { inner, f }
+    fn new<B: Into<Bucket>>(inner: I, bucket: B, f: F) -> Self {
+        Self {
+            inner,
+            bucket: bucket.into(),
+            f,
+        }
     }
 }
 
 impl<I, F> Iterator for MapKey<I, F>
 where
-    I: Iterator<Item = (Bucket, KeyPrefix)>,
+    I: Iterator<Item = KeyPrefix>,
     F: FnMut(KeyPrefix) -> Key,
 {
     type Item = ObjectUri;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let (bucket, prefix) = self.inner.next()?;
+        let prefix = self.inner.next()?;
         let key = (self.f)(prefix);
-        let uri = ObjectUri::new(bucket, key);
-        Some(uri)
-    }
-}
-
-/// Iterator for [`map_prefix`](ObjectUriIterExt::map_prefix).
-pub struct MapPrefix<I, F> {
-    inner: I,
-    f: F,
-    ext: Option<String>,
-}
-
-impl<I, F> MapPrefix<I, F> {
-    fn new(inner: I, f: F, ext: Option<String>) -> Self {
-        Self { inner, f, ext }
-    }
-}
-
-impl<I, F> Iterator for MapPrefix<I, F>
-where
-    I: Iterator<Item = (Bucket, KeyPrefix)>,
-    F: FnMut(KeyPrefix) -> KeyPrefix,
-{
-    type Item = ObjectUri;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let (bucket, prefix) = self.inner.next()?;
-        let new_prefix = (self.f)(prefix);
-        let name = uuid::Uuid::now_v7();
-        let key: Key = match &self.ext {
-            Some(ext) => format!("{new_prefix}{name}.{ext}"),
-            _ => format!("{new_prefix}{name}"),
-        }
-        .into();
-        let uri = ObjectUri::new(bucket, key);
+        let uri = ObjectUri::new(self.bucket.clone(), key);
         Some(uri)
     }
 }

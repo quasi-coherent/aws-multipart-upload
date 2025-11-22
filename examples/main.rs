@@ -1,49 +1,110 @@
 use aws_multipart_upload::aws_config as config;
-use aws_multipart_upload::codec::{JsonLinesEncoder, JsonLinesEncoderBuilder};
+use aws_multipart_upload::codec::{CsvBuilder, CsvEncoder};
 use aws_multipart_upload::error::Error;
 use aws_multipart_upload::prelude::*;
 use aws_multipart_upload::request::CompletedUpload;
-use aws_multipart_upload::uri::{Bucket, KeyPrefix};
-use aws_multipart_upload::{FusedMultipartWrite, NewObjectUri, SdkClient, UploadClient};
+use aws_multipart_upload::uri::{KeyPrefix, NewObjectUri};
+use aws_multipart_upload::{ByteSize, SdkClient, Status, UploadBuilder};
 use chrono::{DateTime, Utc};
 use futures::{Stream, StreamExt, stream};
 use serde::{Deserialize, Serialize};
+use tracing_subscriber::filter::{EnvFilter, LevelFilter};
+use tracing_subscriber::{fmt, prelude::*};
 
 const BUCKET: &str = "test-bucket-use2";
 const PREFIX: &str = "example/prefix";
-const PART_BYTES: usize = 5 * 1024 * 1024 * 512;
-const UPLOAD_BYTES: usize = 10 * 1024 * 1024 * 1024;
 
 #[tokio::main]
 async fn main() {
-    let client = sdk_client().await;
-    // let uploader = LoginUploader {
-    //     encoder: JsonLinesEncoder::new(None),
-    // };
+    let filter = EnvFilter::builder()
+        .with_default_directive(LevelFilter::WARN.into())
+        .parse("aws_multipart_upload=trace")
+        .unwrap();
+
+    tracing_subscriber::registry()
+        .with(fmt::layer())
+        .with(filter)
+        .init();
+
+    let app = ExampleApp::default();
+    let uploader = app.uploader().await;
+
+    let completed = ExampleApp::input_stream()
+        .take(10000)
+        .assemble(uploader)
+        .await
+        .inspect_err(|e| println!("{e}"))
+        .unwrap();
+
+    let uri = completed.uri;
+    let etag = completed.etag;
+    println!("upload to {uri} finished, object etag: {etag}");
 }
 
-struct ExampleApp {}
+struct ExampleApp {
+    endpoint_url: String,
+    upload_mib: u64,
+    part_mib: u64,
+}
 
-impl ExampleApp {
-    fn new(sdk: SdkClient) -> impl FusedMultipartWrite<UserLogin, Output = CompletedUpload> {
-        let iter = std::iter::repeat_with(|| (Bucket::from(BUCKET), KeyPrefix::from(PREFIX)))
-            .map_key(|prefix| prefix.to_key(&Utc::now().timestamp_millis().to_string()));
-
-        let client = UploadClient::new(sdk);
-
-        aws_multipart_upload::part_buffer(20)
-            .into_uploader_with_uri(&client, NewObjectUri::uri_iter(iter))
-            .with_part_encoder(JsonLinesEncoderBuilder::default(), None)
+impl Default for ExampleApp {
+    fn default() -> Self {
+        Self {
+            endpoint_url: "http://127.0.0.1:9090".into(),
+            upload_mib: 10,
+            part_mib: 6,
+        }
     }
 }
 
-async fn sdk_client() -> SdkClient {
-    let loader = config::from_env()
-        .region("us-east-2")
-        .app_name(config::AppName::new("example-app").unwrap())
-        .endpoint_url("http://localhost:9090");
+impl ExampleApp {
+    async fn uploader(
+        &self,
+    ) -> impl FusedMultipartWrite<UserLogin, Ret = Status, Error = Error, Output = CompletedUpload>
+    {
+        let client = self.sdk_client().await;
+        let iter = self.uri_iter();
 
-    SdkClient::from_config(loader).await
+        UploadBuilder::new(client)
+            .max_active_tasks(15)
+            .upload_size(ByteSize::mib(self.upload_mib))
+            .part_size(ByteSize::mib(self.part_mib))
+            .with_encoding(CsvBuilder)
+            .with_uri_iter(iter)
+            .build::<UserLogin, CsvEncoder>()
+    }
+
+    fn uri_iter(&self) -> NewObjectUri {
+        let iter = std::iter::repeat_with(|| KeyPrefix::from(PREFIX)).map_key(BUCKET, |prefix| {
+            let now = Utc::now();
+            let us = now.timestamp_micros();
+            let pfx = now.format("%Y/%m/%d/%H").to_string();
+            let root = format!("{pfx}/{us}.csv");
+            prefix.to_key(&root)
+        });
+        NewObjectUri::uri_iter(iter)
+    }
+
+    async fn sdk_client(&self) -> SdkClient {
+        let loader = config::from_env()
+            .region("us-east-2")
+            .app_name(config::AppName::new("example-app").unwrap())
+            .endpoint_url(&self.endpoint_url);
+        SdkClient::from_config(loader).await
+    }
+
+    fn input_stream() -> impl Stream<Item = UserLogin> {
+        stream::iter(0..).map(|n| UserLogin {
+            user_id: n % 50,
+            display_name: format!("user_{}", n % 50),
+            timestamp: Utc::now(),
+            outcome: if n % 24 == 0 {
+                Outcome::Deny
+            } else {
+                Outcome::Success
+            },
+        })
+    }
 }
 
 /// An item in a message stream we wish to archive in S3.
@@ -59,17 +120,4 @@ struct UserLogin {
 enum Outcome {
     Success,
     Deny,
-}
-
-fn user_login() -> impl Stream<Item = UserLogin> {
-    stream::iter(0..).map(|n| UserLogin {
-        user_id: n % 50,
-        display_name: format!("user_{}", n % 50),
-        timestamp: Utc::now(),
-        outcome: if n % 24 == 0 {
-            Outcome::Deny
-        } else {
-            Outcome::Success
-        },
-    })
 }

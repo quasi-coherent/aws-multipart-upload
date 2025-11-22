@@ -2,7 +2,7 @@ use crate::client::part::{CompletedParts, PartBody, PartNumber};
 use crate::client::request::*;
 use crate::client::{UploadClient, UploadData, UploadId};
 use crate::error::{Error as UploadError, Result};
-use crate::uri::{NewObjectUri, ObjectUri, OneTimeUse};
+use crate::uri::{NewObjectUri, ObjectUri};
 
 use futures::ready;
 use multipart_write::{FusedMultipartWrite, MultipartWrite};
@@ -21,20 +21,20 @@ pub struct UploadSent {
     /// The part number that was used in the part upload request.
     pub part: PartNumber,
     /// The size in bytes of the body of the part upload request.
-    pub size: usize,
+    pub bytes: u64,
 }
 
 impl UploadSent {
-    fn new(id: &UploadId, part: PartNumber, size: usize) -> Self {
+    fn new(id: &UploadId, part: PartNumber, bytes: usize) -> Self {
         Self {
             id: id.clone(),
             part,
-            size,
+            bytes: bytes as u64,
         }
     }
 }
 
-/// A type to manage the lifecycle of a repeating series of multipart uploads.
+/// A type to manage the lifecycle of a multipart upload.
 ///
 /// This `MultipartWrite` implementation is over the [`PartBody`] of a part
 /// upload request.  Sending a `PartBody` forms and submits the request to upload
@@ -49,30 +49,25 @@ impl UploadSent {
 /// [`CompletedUpload`]: crate::client::request::CompletedUpload
 #[must_use = "futures do nothing unless polled"]
 #[pin_project::pin_project]
-pub struct UploaderWithUri<Buf> {
+pub struct Upload<Buf> {
     #[pin]
-    uploader: Uploader<Buf>,
+    inner: UploadImpl<Buf>,
     #[pin]
     fut: Option<SendCreateUpload>,
     next_uri: Option<ObjectUri>,
     iter: NewObjectUri,
 }
 
-impl<Buf> UploaderWithUri<Buf> {
+impl<Buf> Upload<Buf> {
     pub(crate) fn new(buf: Buf, client: &UploadClient, mut iter: NewObjectUri) -> Self {
-        let uploader = Uploader::new_inactive(buf, client);
+        let inner = UploadImpl::new(buf, client);
         let fut = iter.new_upload(client);
         Self {
-            uploader,
+            inner,
             fut,
             next_uri: None,
             iter,
         }
-    }
-
-    pub(crate) fn new_with_uri(buf: Buf, client: &UploadClient, uri: ObjectUri) -> Self {
-        let iter = NewObjectUri::uri_iter(OneTimeUse::new(uri));
-        Self::new(buf, client, iter)
     }
 
     fn poll_new_upload(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<()>> {
@@ -81,7 +76,7 @@ impl<Buf> UploaderWithUri<Buf> {
         if let Some(uri) = this.next_uri.take() {
             trace!(?uri, "starting new upload");
             let req = CreateRequest::new(uri);
-            let fut = SendCreateUpload::new(&this.uploader.client, req);
+            let fut = SendCreateUpload::new(&this.inner.client, req);
             this.fut.set(Some(fut));
         }
 
@@ -90,7 +85,7 @@ impl<Buf> UploaderWithUri<Buf> {
                 Ok(data) => {
                     this.fut.set(None);
                     trace!(id = %data.id, uri = ?data.uri, "started new upload");
-                    this.uploader.as_mut().set_upload_data(data);
+                    this.inner.as_mut().set_upload_data(data);
                 }
                 Err(e) => {
                     this.fut.set(None);
@@ -103,20 +98,20 @@ impl<Buf> UploaderWithUri<Buf> {
     }
 }
 
-impl<Buf> FusedMultipartWrite<PartBody> for UploaderWithUri<Buf>
+impl<Buf> FusedMultipartWrite<PartBody> for Upload<Buf>
 where
     Buf: MultipartWrite<SendUploadPart, Output = CompletedParts, Error = UploadError>,
 {
     fn is_terminated(&self) -> bool {
         // If the inner upload is not active, and there is no request for a new
         // upload nor next URI to make the request, we are terminated.
-        self.uploader.is_terminated() && self.fut.is_none() && self.next_uri.is_none()
+        self.inner.is_terminated() && self.fut.is_none() && self.next_uri.is_none()
     }
 }
 
-impl<Buf> MultipartWrite<PartBody> for UploaderWithUri<Buf>
+impl<Buf> MultipartWrite<PartBody> for Upload<Buf>
 where
-    Buf: MultipartWrite<SendUploadPart, Output = CompletedParts, Error = UploadError>,
+    Buf: MultipartWrite<SendUploadPart, Error = UploadError, Output = CompletedParts>,
 {
     type Ret = UploadSent;
     type Error = UploadError;
@@ -124,20 +119,20 @@ where
 
     fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<()>> {
         ready!(self.as_mut().poll_new_upload(cx))?;
-        self.project().uploader.poll_ready(cx)
+        self.project().inner.poll_ready(cx)
     }
 
     fn start_send(self: Pin<&mut Self>, part: PartBody) -> Result<Self::Ret> {
-        self.project().uploader.start_send(part)
+        self.project().inner.start_send(part)
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<()>> {
-        self.project().uploader.poll_flush(cx)
+        self.project().inner.poll_flush(cx)
     }
 
     fn poll_complete(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<Self::Output>> {
         let mut this = self.project();
-        let out = ready!(this.uploader.as_mut().poll_complete(cx));
+        let out = ready!(this.inner.as_mut().poll_complete(cx));
         *this.next_uri = this.iter.new_uri();
 
         trace!(next_uri = ?this.next_uri, "completed upload");
@@ -145,11 +140,12 @@ where
     }
 }
 
-impl<Buf: Debug> Debug for UploaderWithUri<Buf> {
+impl<Buf: Debug> Debug for Upload<Buf> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_struct("UploaderWithUri")
-            .field("uploader", &self.uploader)
+        f.debug_struct("Upload")
+            .field("inner", &self.inner)
             .field("fut", &self.fut)
+            .field("next_uri", &self.next_uri)
             .field("iter", &self.iter)
             .finish()
     }
@@ -169,7 +165,7 @@ impl<Buf: Debug> Debug for UploaderWithUri<Buf> {
 /// [`CompletedUpload`]: crate::client::request::CompletedUpload
 #[must_use = "futures do nothing unless polled"]
 #[pin_project::pin_project]
-pub struct Uploader<Buf> {
+struct UploadImpl<Buf> {
     #[pin]
     buf: Buf,
     #[pin]
@@ -180,8 +176,8 @@ pub struct Uploader<Buf> {
     part: PartNumber,
 }
 
-impl<Buf> Uploader<Buf> {
-    pub(crate) fn new_inactive(buf: Buf, client: &UploadClient) -> Self {
+impl<Buf> UploadImpl<Buf> {
+    fn new(buf: Buf, client: &UploadClient) -> Self {
         Self {
             buf,
             fut: None,
@@ -197,7 +193,7 @@ impl<Buf> Uploader<Buf> {
     }
 }
 
-impl<Buf> FusedMultipartWrite<PartBody> for Uploader<Buf>
+impl<Buf> FusedMultipartWrite<PartBody> for UploadImpl<Buf>
 where
     Buf: MultipartWrite<SendUploadPart, Output = CompletedParts, Error = UploadError>,
 {
@@ -206,9 +202,9 @@ where
     }
 }
 
-impl<Buf> MultipartWrite<PartBody> for Uploader<Buf>
+impl<Buf> MultipartWrite<PartBody> for UploadImpl<Buf>
 where
-    Buf: MultipartWrite<SendUploadPart, Output = CompletedParts, Error = UploadError>,
+    Buf: MultipartWrite<SendUploadPart, Error = UploadError, Output = CompletedParts>,
 {
     type Ret = UploadSent;
     type Error = UploadError;
@@ -221,10 +217,7 @@ where
     fn start_send(self: Pin<&mut Self>, part: PartBody) -> Result<Self::Ret> {
         let mut this = self.project();
         let bytes = part.size();
-        let data = this
-            .data
-            .as_ref()
-            .expect("polled Uploader after completion");
+        let data = this.data.as_ref().expect("polled Upload after completion");
         let pt_num = this.part.increment();
 
         let req = UploadPartRequest::new(data, part, pt_num);
@@ -234,7 +227,7 @@ where
         trace!(
             id = %sent.id,
             part = %sent.part,
-            size = sent.size,
+            bytes = sent.bytes,
             "part upload initiated",
         );
         Ok(sent)
@@ -251,13 +244,10 @@ where
         let mut this = self.project();
 
         if this.fut.is_none() {
+            let data = this.data.as_ref().expect("polled Upload after completion");
             let mut parts = ready!(this.buf.poll_complete(cx))?;
             let old_parts = std::mem::take(this.completed);
             parts.extend(old_parts);
-            let data = this
-                .data
-                .as_ref()
-                .expect("polled Uploader after completion");
             let req = CompleteRequest::new(data, parts);
             trace!(
                 id = %req.id(),
@@ -273,7 +263,7 @@ where
             .fut
             .as_mut()
             .as_pin_mut()
-            .expect("polled Uploader after completion");
+            .expect("polled Upload after completion");
         let out = ready!(fut.poll(cx));
         this.fut.set(None);
         *this.data = None;
@@ -283,9 +273,9 @@ where
     }
 }
 
-impl<Buf: Debug> Debug for Uploader<Buf> {
+impl<Buf: Debug> Debug for UploadImpl<Buf> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Uploader")
+        f.debug_struct("UploadImpl")
             .field("buf", &self.buf)
             .field("fut", &self.fut)
             .field("data", &self.data)
