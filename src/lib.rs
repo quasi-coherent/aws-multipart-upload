@@ -9,7 +9,7 @@
 //! # Examples
 //!
 //! ```rust
-//! # use aws_multipart_upload::{SendRequest, UploadData, Status, ObjectUri};
+//! # use aws_multipart_upload::{SendRequest, Status, ObjectUri, UploadBuilder, ByteSize};
 //! # use aws_multipart_upload::error::Result;
 //! # use aws_multipart_upload::request::*;
 //! # use serde_json::Value;
@@ -24,7 +24,7 @@
 //! #     async fn send_new_part_upload_request(&self, req: UploadPartRequest) -> Result<CompletedPart> {
 //! #         let mut inner = self.0.write().unwrap();
 //! #         inner.push(req.body().clone());
-//! #         Ok(CompletedPart::new("".into(), req.part_number(), req.body().size()))
+//! #         Ok(CompletedPart::new("".into(), "".into(), req.part_number(), req.body().size()))
 //! #     }
 //! #     async fn send_complete_upload_request(&self, req: CompleteRequest) -> Result<CompletedUpload> {
 //! #         Ok(CompletedUpload::new(req.uri().clone(), "".into()))
@@ -53,9 +53,9 @@
 //! let mut uploader = UploadBuilder::new(client)
 //!     .upload_size(ByteSize::mib(20))
 //!     .part_size(ByteSize::mib(5))
-//!     .encoding(JsonLinesBuilder)
+//!     .with_encoding(JsonLinesBuilder)
 //!     .with_uri(("a-bucket-us-east-1", "an/object/key.jsonl"))
-//!     .build::<Value, JsonLines>();
+//!     .build::<Value, JsonLinesEncoder>();
 //!
 //! /// Now the uploader can have `serde_json::Value`s written to it to build a
 //! /// part of the upload.
@@ -65,7 +65,7 @@
 //! for n in 0..100000 {
 //!     let item = json!({"k1": n, "k2": n.to_string()});
 //!     let status = uploader.send_part(item).await?;
-//!     println!("current part size: {}", status.part_size);
+//!     println!("bytes written to part: {}", status.part_bytes);
 //!
 //!     // We've reached target upload size:
 //!     if status.should_upload {
@@ -120,6 +120,7 @@ pub mod prelude {
     pub use crate::uri::ObjectUriIterExt as _;
     #[allow(unreachable_pub)]
     pub use crate::write::{UploadStreamExt as _, UploadWriteExt as _};
+    #[doc(no_inline)]
     pub use multipart_write::{FusedMultipartWrite, MultipartWrite};
     #[allow(unreachable_pub)]
     pub use multipart_write::{MultipartStreamExt as _, MultipartWriteExt as _};

@@ -1,7 +1,7 @@
 //! `ObjectUri` iterators.
 //!
-//! This module provides types that can help in building iterators of URIs to
-//! to a multipart upload type with [`NewObjectUri`].
+//! This module provides types that can help in building iterators of URIs for
+//! a multipart upload type with [`NewObjectUri`].
 //!
 //! The only thing required to create a new upload is the URI of the object to be
 //! uploaded, so given an iterator of `ObjectUri`s, this defines a sequence of
@@ -15,8 +15,7 @@
 //! current date and time.
 //!
 //! ```rust
-//! use aws_multipart_upload::{Bucket, Key, KeyPrefix, NewObjectUri};
-//! use aws_multipart_upload::uri::ObjectUriIterExt as _;
+//! use aws_multipart_upload::uri::{KeyPrefix, NewObjectUri, ObjectUriIterExt};
 //!
 //! const BUCKET: &str = "my-bucket";
 //! const PREFIX: &str = "static/object/prefix";
@@ -26,7 +25,7 @@
 //!     let now = chrono::Utc::now();
 //!     let now_str = now.format("%Y/%m/%d/%H").to_string();
 //!     let us = now.timestamp_micros();
-//!     let root = format!("{now_str}/{us}.csv")
+//!     let root = format!("{now_str}/{us}.csv");
 //!     prefix.to_key(&root)
 //! });
 //!
