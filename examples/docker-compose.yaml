@@ -4,10 +4,10 @@ services:
     environment:
       - COM_ADOBE_TESTING_S3MOCK_STORE_INITIAL_BUCKETS=test-bucket-use2
       - COM_ADOBE_TESTING_S3MOCK_STORE_REGION=us-east-2
-      - COM_ADOBE_TESTING_S3MOCK_STORE_ROOT=store
+      - COM_ADOBE_TESTING_S3MOCK_STORE_ROOT=/store
       - COM_ADOBE_TESTING_S3MOCK_STORE_RETAIN_FILES_ON_EXIT=true
     ports:
       - 9090:9090
       - 9091:9091
     volumes:
-      - "./mockstore:/store"
+      - ./.teststore:/store
