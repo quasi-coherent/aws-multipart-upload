@@ -55,7 +55,7 @@ impl MultipartWrite<SendUploadPart> for PartBuffer {
                         size = v.part_size,
                         "completed part",
                     );
-                    this.completed.push(v)
+                    this.completed.push(v);
                 }
                 Err(e) => return Poll::Ready(Err(e)),
             }

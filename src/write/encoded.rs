@@ -78,18 +78,15 @@ impl UploadState {
 
 /// A type for creating, building, and completing a multipart upload.
 ///
-/// `EncodedUpload` is comprised of a [`PartEncoder`] and a multipart writer
-/// accepting the output of the encoder, [`PartBody`].  As an implementor of
-/// [`MultipartWrite`], it writes an an arbitrary `Item` type that the encoding
-/// is capable of writing, returning the current [`Status`] of the upload.
+/// This composes a [`PartEncoder`] in front of a multipart upload in order to
+/// build the part upload request body from an arbitrary `Item`.  Parts are
+/// uploaded according the target part size this value is configured with.
 ///
-/// Behind the scenes, the encoder writes items until it is of sufficient size,
-/// at which point the encoder is converted into a part upload request body and
-/// the request is sent to a buffer of such pending request futures.  Flushing
-/// drains this buffer and polling for completion finishes the upload from all of
-/// the parts that were sent and finished.
+/// This writer itself is reusable, i.e., one can continue writing `Item`s after
+/// completing an upload, if and only if `U` is.
 ///
-/// [`MultipartWrite`]: multipart_write::MultipartWrite
+/// [`PartEncoder`]: crate::codec::PartEncoder
+#[must_use = "futures do nothing unless polled"]
 #[pin_project::pin_project]
 pub struct EncodedUpload<Item, E: PartEncoder<Item>, U> {
     #[pin]
@@ -206,6 +203,8 @@ where
         }
         let mut this = self.project();
         let out = ready!(this.uploader.as_mut().poll_complete(cx))?;
+        // The `as usize` is safe because we have bounded `max_part_bytes` by
+        // usize::MAX in `UploadBuilder`.
         let capacity = *this.max_part_bytes as usize;
         let new_encoder = E::build(this.builder, capacity)?;
         *this.encoder = new_encoder;

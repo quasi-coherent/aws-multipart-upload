@@ -1,7 +1,6 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![warn(missing_docs)]
-
-//! `aws-multipart-upload`
+//! # aws-multipart-upload
 //!
 //! A high-level API for building and working with AWS S3 multipart uploads using the official [SDK] for
 //! Rust.
@@ -20,7 +19,7 @@
 //!   upload when requested.
 //! * An interface for encoding arbitrary values in the body of a part upload request.
 //!
-//! Combined with any [`SendRequest`], these components are collected in the type [`MultipartUploader`],
+//! Combined with any [`SendRequest`], these components are collected in the type [`MultipartUpload`],
 //! which is able to manage the end-to-end lifecycle of a single multipart upload, or a series of them
 //! continuing indefinitely.
 //!
@@ -30,11 +29,11 @@
 //!
 //! ## Example
 //!
-//! The following example shows how a `MultipartUploader` can be used more manually, in that the upload
-//! happens by explicit method calls on the uploader.
+//! The following example shows how a `MultipartUpload` can be used more manually, in that the upload
+//! happens by explicit method calls.
 //!
-//! See the example in the [README][readme-eg] or the [example][repo-eg] in the crate repository for other
-//! uses.
+//! See the example in the [README][readme-eg] or the [examples][repo-eg] in the crate repository for
+//! other uses.
 //!
 //! ```rust
 //! # use aws_multipart_upload::{SendRequest, Status, ObjectUri, UploadBuilder, ByteSize};
@@ -157,7 +156,7 @@ pub mod request {
 
 pub mod uri;
 #[doc(inline)]
-pub use uri::{NewObjectUri, ObjectUri};
+pub use uri::{ObjectUri, ObjectUriIter};
 
 // https://docs.aws.amazon.com/AmazonS3/latest/userguide/qfacts.html
 const AWS_MAX_OBJECT_SIZE: ByteSize = ByteSize::tib(5);
@@ -175,7 +174,7 @@ pub struct UploadBuilder<B = JsonLinesBuilder> {
     max_tasks: Option<usize>,
     abort_failed: bool,
     builder: B,
-    iter: NewObjectUri,
+    iter: ObjectUriIter,
 }
 
 impl UploadBuilder {
@@ -191,7 +190,7 @@ impl UploadBuilder {
             max_tasks: Some(10),
             abort_failed: false,
             builder: JsonLinesBuilder,
-            iter: NewObjectUri::uri_iter(EmptyUri),
+            iter: ObjectUriIter::new(EmptyUri),
         }
     }
 
@@ -257,17 +256,17 @@ impl<B> UploadBuilder<B> {
     pub fn with_uri<T: Into<ObjectUri>>(self, uri: T) -> Self {
         let inner = uri::OneTimeUse::new(uri.into());
         Self {
-            iter: NewObjectUri::uri_iter(inner),
+            iter: ObjectUriIter::new(inner),
             ..self
         }
     }
 
     /// Use the iterator to start a new upload when one completes.
-    pub fn with_uri_iter<I>(self, iter: I) -> Self
+    pub fn with_uri_iter<I>(self, inner: I) -> Self
     where
         I: IntoIterator<Item = ObjectUri> + 'static,
     {
-        let iter = NewObjectUri::uri_iter(iter);
+        let iter = ObjectUriIter::new(inner);
         Self { iter, ..self }
     }
 

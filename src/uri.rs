@@ -1,7 +1,7 @@
 //! `ObjectUri` iterators.
 //!
 //! This module provides types that can help in building iterators of URIs for
-//! a multipart upload type with [`NewObjectUri`].
+//! a multipart upload type with [`ObjectUriIter`].
 //!
 //! The only thing required to create a new upload is the URI of the object to be
 //! uploaded, so given an iterator of `ObjectUri`s, this defines a sequence of
@@ -15,7 +15,7 @@
 //! current date and time.
 //!
 //! ```rust
-//! use aws_multipart_upload::uri::{KeyPrefix, NewObjectUri, ObjectUriIterExt};
+//! use aws_multipart_upload::uri::{KeyPrefix, ObjectUriIter, ObjectUriIterExt};
 //!
 //! const BUCKET: &str = "my-bucket";
 //! const PREFIX: &str = "static/object/prefix";
@@ -29,13 +29,13 @@
 //!     prefix.to_key(&root)
 //! });
 //!
-//! let mut uri = NewObjectUri::uri_iter(iter);
+//! let mut uri = ObjectUriIter::uri_iter(iter);
 //! let new_uri = uri.new_uri().unwrap();
 //!
 //! println!("{new_uri}");
 //! // "s3://my-bucket/static/object/prefix/2025/11/11/11/01/1763683634194850.csv"
 //! ```
-//! [`NewObjectUri`]: super::NewObjectUri
+//! [`ObjectUriIter`]: super::ObjectUriIter
 use crate::client::UploadClient;
 use crate::client::request::{CreateRequest, SendCreateUpload};
 
@@ -104,6 +104,12 @@ impl Deref for Bucket {
     }
 }
 
+impl AsRef<str> for Bucket {
+    fn as_ref(&self) -> &str {
+        self
+    }
+}
+
 impl fmt::Display for Bucket {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
@@ -142,6 +148,12 @@ impl Deref for Key {
 
     fn deref(&self) -> &str {
         &self.0
+    }
+}
+
+impl AsRef<str> for Key {
+    fn as_ref(&self) -> &str {
+        self
     }
 }
 
@@ -196,6 +208,12 @@ impl Deref for KeyPrefix {
     }
 }
 
+impl AsRef<str> for KeyPrefix {
+    fn as_ref(&self) -> &str {
+        self
+    }
+}
+
 impl fmt::Display for KeyPrefix {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
@@ -215,13 +233,13 @@ impl From<String> for KeyPrefix {
 }
 
 /// Produce an `ObjectUri` for a new upload from an iterator.
-pub struct NewObjectUri {
+pub struct ObjectUriIter {
     inner: Box<dyn Iterator<Item = ObjectUri>>,
 }
 
-impl NewObjectUri {
-    /// Create a new `NewObjectUri` from an arbitrary iterator of `ObjectUri`.
-    pub fn uri_iter<I>(iter: I) -> Self
+impl ObjectUriIter {
+    /// Create a new `ObjectUriIter` from an arbitrary iterator of `ObjectUri`.
+    pub fn new<I>(iter: I) -> Self
     where
         I: IntoIterator<Item = ObjectUri> + 'static,
     {
@@ -230,30 +248,32 @@ impl NewObjectUri {
         }
     }
 
-    /// Produce the next value from the inner iterator.
-    pub fn new_uri(&mut self) -> Option<ObjectUri> {
-        self.inner.next()
-    }
-
     /// Construct the request future to create a new multipart upload using the
-    /// next `ObjectUri` produced by this `NewObjectUri` value.
-    pub fn new_upload(&mut self, client: &UploadClient) -> Option<SendCreateUpload> {
-        let uri = self.inner.next()?;
+    /// next `ObjectUri` produced by this `ObjectUriIter` value.
+    pub fn next_upload(&mut self, client: &UploadClient) -> Option<SendCreateUpload> {
+        let uri = self.next()?;
         let req = CreateRequest::new(uri);
         let fut = SendCreateUpload::new(client, req);
         Some(fut)
     }
 }
 
-impl Default for NewObjectUri {
+impl Default for ObjectUriIter {
     fn default() -> Self {
-        Self::uri_iter(EmptyUri)
+        Self::new(EmptyUri)
     }
 }
 
-impl fmt::Debug for NewObjectUri {
+impl Iterator for ObjectUriIter {
+    type Item = ObjectUri;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next()
+    }
+}
+
+impl fmt::Debug for ObjectUriIter {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_struct("NewObjectUri")
+        f.debug_struct("ObjectUriIter")
             .field("inner", &"Iterator<Item = ObjectUri>")
             .finish()
     }

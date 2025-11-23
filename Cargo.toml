@@ -1,6 +1,6 @@
 [package]
 name = "aws-multipart-upload"
-version = "0.1.0-rc2"
+version = "0.1.0-rc3"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/quasi-coherent/aws-multipart-upload"
 readme = "README.md"
@@ -16,11 +16,8 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 default = []
-all = ["csv", "parquet", "tracing"]
-parquet = ["dep:parquet", "arrow"]
 
 [dependencies]
-arrow = { version = "56.2.0", optional = true }
 aws-config = { version = "1.8.8", features = ["behavior-version-latest"] }
 aws-sdk-s3 = "1.115.0"
 bytes = "1.10.1"
@@ -30,7 +27,6 @@ futures = "0.3.31"
 serde = "1.0"
 serde_json = "1.0"
 multipart-write = "0.1.0-rc5"
-parquet = { version = "56.2.0", optional = true }
 pin-project = "1.1.10"
 thiserror = "2.0.14"
 tracing = { version = "0.1.41", optional = true }

@@ -18,5 +18,5 @@ async fn main() {
                 Err(e) => println!("error in multipart upload: {e}"),
             }
         })
-        .await
+        .await;
 }
