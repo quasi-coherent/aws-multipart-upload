@@ -16,10 +16,20 @@ pub struct ParquetBuilder {
 }
 
 impl ParquetBuilder {
-    /// Initialize the builder from fields to build an Arrow [`Schema`].
+    /// Initialize the builder from an arrow [`Schema`].
     ///
     /// [`Schema`]: arrow::datatypes::Schema
-    pub fn new<F: Into<Fields>>(fields: F) -> Self {
+    pub fn new(schema: Schema) -> Self {
+        Self {
+            schema,
+            properties: WriterProperties::default(),
+        }
+    }
+
+    /// Initialize the builder from fields for an arrow [`Schema`].
+    ///
+    /// [`Schema`]: arrow::datatypes::Schema
+    pub fn from_fields<F: Into<Fields>>(fields: F) -> Self {
         let schema = Schema::new(fields);
         Self {
             schema,
@@ -50,7 +60,7 @@ pub struct ParquetEncoder {
     writer: ArrowWriter<PartBody>,
 }
 
-impl PartEncoder<&RecordBatch> for ParquetEncoder {
+impl PartEncoder<RecordBatch> for ParquetEncoder {
     type Builder = ParquetBuilder;
     type Error = ParquetError;
 
@@ -58,9 +68,9 @@ impl PartEncoder<&RecordBatch> for ParquetEncoder {
         builder.build(part_size)
     }
 
-    fn encode(&mut self, item: &RecordBatch) -> Result<usize, Self::Error> {
+    fn encode(&mut self, item: RecordBatch) -> Result<usize, Self::Error> {
         let bytes = item.get_array_memory_size();
-        self.writer.write(item)?;
+        self.writer.write(&item)?;
         Ok(bytes)
     }
 

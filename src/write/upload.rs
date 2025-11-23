@@ -151,18 +151,7 @@ impl<Buf: Debug> Debug for Upload<Buf> {
     }
 }
 
-/// A type to manage the lifecycle of a multipart upload.
-///
-/// This `MultipartWrite` implementation is over the [`PartBody`] of a part
-/// upload request.  Sending a `PartBody` forms and submits the request to upload
-/// it to a multipart upload, and polling for completion completes the upload,
-/// returning the response in [`CompletedUpload`].
-///
-/// Note that this writer becomes terminated after completion.  It is an error
-/// to poll it after `poll_complete` has returned.
-///
-/// [`PartBody`]: crate::client::part::PartBody
-/// [`CompletedUpload`]: crate::client::request::CompletedUpload
+/// Responsible for a single upload, which `Upload` orchestrates.
 #[must_use = "futures do nothing unless polled"]
 #[pin_project::pin_project]
 struct UploadImpl<Buf> {
@@ -245,10 +234,10 @@ where
 
         if this.fut.is_none() {
             let data = this.data.as_ref().expect("polled Upload after completion");
-            let mut parts = ready!(this.buf.poll_complete(cx))?;
-            let old_parts = std::mem::take(this.completed);
-            parts.extend(old_parts);
-            let req = CompleteRequest::new(data, parts);
+            let parts = ready!(this.buf.poll_complete(cx))?;
+            this.completed.extend(parts);
+            let completed = std::mem::take(this.completed);
+            let req = CompleteRequest::new(data, completed);
             trace!(
                 id = %req.id(),
                 uri = ?req.uri(),
@@ -265,10 +254,12 @@ where
             .as_pin_mut()
             .expect("polled Upload after completion");
         let out = ready!(fut.poll(cx));
+
         this.fut.set(None);
         *this.data = None;
-
+        *this.part = PartNumber::default();
         trace!(result = ?out, "completed upload");
+
         Poll::Ready(out)
     }
 }

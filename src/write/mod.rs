@@ -28,6 +28,17 @@ pub use self::upload::{Upload, UploadSent};
 /// A type for creating, building, and completing a multipart upload.
 pub type MultipartUpload<Item, E> = EncodedUpload<Item, E, Upload<PartBuffer>>;
 
+/// Trait alias for a multipart writer that returns upload status and outputs
+/// completed upload response data, primarily to make type signatures less
+/// verbose, for instance when returning an impl.
+pub trait AwsMultipartUpload<Item>
+where
+    Self: FusedMultipartWrite<Item, Ret = Status, Error = UploadError, Output = CompletedUpload>,
+{
+}
+
+impl<Item, E: PartEncoder<Item>> AwsMultipartUpload<Item> for MultipartUpload<Item, E> {}
+
 /// Extension trait for `MultipartWrite` adding specializations for S3 uploads.
 pub trait UploadWriteExt<Part>: MultipartWrite<Part> {
     /// Returns a new `MultipartWrite` that uploads to a multipart upload, using
@@ -73,7 +84,7 @@ pub type IntoUpload<St, U, F> = Assembled<St, U, F>;
 pub trait UploadStreamExt: Stream {
     /// Collect this stream into a multipart upload, returning the result of
     /// completing the upload in a future.
-    fn collect_upload<U>(self, uploader: U) -> Assemble<Self, U>
+    fn collect_upload<U>(self, uploader: U) -> CollectUpload<Self, U>
     where
         Self: Sized,
         U: FusedMultipartWrite<Self::Item, Error = UploadError, Output = CompletedUpload>,
@@ -87,7 +98,7 @@ pub trait UploadStreamExt: Stream {
     ///
     /// The resulting stream ends when either the input stream is exhausted or
     /// the uploader is unable to start the next upload after producing an item.
-    fn into_upload<U>(self, uploader: U) -> Assembled<Self, U, fn(&Status) -> bool>
+    fn into_upload<U>(self, uploader: U) -> IntoUpload<Self, U, fn(&Status) -> bool>
     where
         Self: Sized,
         U: FusedMultipartWrite<
@@ -103,7 +114,7 @@ pub trait UploadStreamExt: Stream {
     /// Transform the input stream by writing its items to the uploader `U`,
     /// producing the next item in the stream by completing the upload when the
     /// given closure returns true.
-    fn into_upload_when<U, F>(self, uploader: U, f: F) -> Assembled<Self, U, F>
+    fn into_upload_when<U, F>(self, uploader: U, f: F) -> IntoUpload<Self, U, F>
     where
         Self: Sized,
         U: FusedMultipartWrite<Self::Item, Error = UploadError, Output = CompletedUpload>,
