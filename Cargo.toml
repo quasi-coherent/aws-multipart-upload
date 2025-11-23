@@ -1,6 +1,6 @@
 [package]
 name = "aws-multipart-upload"
-version = "0.1.0-rc1"
+version = "0.1.0-rc2"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/quasi-coherent/aws-multipart-upload"
 readme = "README.md"
@@ -16,6 +16,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 default = []
+all = ["csv", "parquet", "tracing"]
 parquet = ["dep:parquet", "arrow"]
 
 [dependencies]
@@ -40,6 +41,9 @@ tokio = { version = "1", default-features = false, features = ["macros", "rt-mul
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 
 [[example]]
-name = "main"
-path = "examples/main.rs"
+name = "jsonlines"
+required-features = ["tracing"]
+
+[[example]]
+name = "csv"
 required-features = ["csv", "tracing"]

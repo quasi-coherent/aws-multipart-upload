@@ -253,6 +253,7 @@ impl CompletedParts {
     /// Extend this `CompletedParts` by the values from another.
     pub fn extend(&mut self, other: CompletedParts) {
         self.0.extend(other.0);
+        self.sort_ascending();
     }
 
     /// Returns the number of parts that have been successfully uploaded.
@@ -273,6 +274,14 @@ impl CompletedParts {
             _ => PartNumber::default(),
         }
     }
+
+    /// Sort the `CompletedPart`s in increasing order by part number.
+    ///
+    /// It is an error to make a request where the completed parts are not in
+    /// order.
+    pub fn sort_ascending(&mut self) {
+        self.sort_by_key(|part| part.part_number);
+    }
 }
 
 impl Deref for CompletedParts {
@@ -280,6 +289,12 @@ impl Deref for CompletedParts {
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl DerefMut for CompletedParts {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 

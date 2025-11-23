@@ -53,7 +53,7 @@ pub trait RequestBuilder {
     }
 }
 
-/// Default implementation of [`RequestBuilder`] that doesn't modify the request
+/// Default implementation of `RequestBuilder` that doesn't modify the request
 /// object at all.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DefaultRequestBuilder;

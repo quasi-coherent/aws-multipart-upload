@@ -18,6 +18,7 @@ pub struct PartBuffer {
     pending: FuturesUnordered<SendUploadPart>,
     completed: CompletedParts,
     capacity: Option<NonZeroUsize>,
+    flushing: bool,
 }
 
 impl PartBuffer {
@@ -26,6 +27,7 @@ impl PartBuffer {
             pending: FuturesUnordered::new(),
             completed: CompletedParts::default(),
             capacity: capacity.and_then(NonZeroUsize::new),
+            flushing: false,
         }
     }
 }
@@ -37,6 +39,11 @@ impl MultipartWrite<SendUploadPart> for PartBuffer {
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<()>> {
         let mut this = self.project();
+        // Flushing means completely emptying the pending buffer, so we don't
+        // want to be adding to it when that's in progress.
+        if *this.flushing {
+            return Poll::Pending;
+        }
         // Poke the pending uploads to see if any are ready.
         while let Poll::Ready(Some(res)) = this.pending.as_mut().poll_next(cx) {
             match res {
@@ -67,6 +74,8 @@ impl MultipartWrite<SendUploadPart> for PartBuffer {
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<()>> {
         let mut this = self.project();
+        *this.flushing = true;
+
         while !this.pending.is_empty() {
             match ready!(this.pending.as_mut().poll_next(cx)) {
                 Some(Ok(v)) => {
@@ -84,6 +93,8 @@ impl MultipartWrite<SendUploadPart> for PartBuffer {
                 _ => break,
             }
         }
+
+        *this.flushing = false;
         Poll::Ready(Ok(()))
     }
 
@@ -99,6 +110,7 @@ impl Debug for PartBuffer {
             .field("pending", &self.pending)
             .field("completed", &self.completed)
             .field("capacity", &self.capacity)
+            .field("flushing", &self.flushing)
             .finish()
     }
 }

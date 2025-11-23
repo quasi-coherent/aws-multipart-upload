@@ -62,7 +62,9 @@ impl UploadState {
     }
 
     fn update_encode(&mut self, bytes: usize) {
-        self.part_bytes += bytes as u64;
+        let n = bytes as u64;
+        self.total_bytes += n;
+        self.part_bytes += n;
         self.total_items += 1;
     }
 
@@ -70,7 +72,6 @@ impl UploadState {
         self.id = Some(sent.id);
         self.part = Some(sent.part);
         self.part_bytes = 0;
-        self.total_bytes += sent.bytes;
         self.total_parts += 1;
     }
 }
@@ -88,14 +89,7 @@ impl UploadState {
 /// drains this buffer and polling for completion finishes the upload from all of
 /// the parts that were sent and finished.
 ///
-/// Being a `MultipartWrite`, the extension trait [`MultipartWriteExt`] provides
-/// many useful combinators available on `EncodedUpload`.  See also the
-/// extension [`MultipartStreamExt`], which has helpful methods for using the
-/// multipart uploader in a streaming context.
-///
 /// [`MultipartWrite`]: multipart_write::MultipartWrite
-/// [`MultipartWriteExt`]: multipart_write::MultipartWriteExt
-/// [`MultipartStreamExt`]: multipart_write::MultipartStreamExt
 #[pin_project::pin_project]
 pub struct EncodedUpload<Item, E: PartEncoder<Item>, U> {
     #[pin]
@@ -215,6 +209,8 @@ where
         let capacity = *this.max_part_bytes as usize;
         let new_encoder = E::build(this.builder, capacity)?;
         *this.encoder = new_encoder;
+        *this.state = UploadState::default();
+        *this.start = Instant::now();
         Poll::Ready(Ok(out))
     }
 }
