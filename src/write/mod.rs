@@ -28,9 +28,7 @@ pub use self::upload::{Upload, UploadSent};
 /// A type for creating, building, and completing a multipart upload.
 pub type MultipartUpload<Item, E> = EncodedUpload<Item, E, Upload<PartBuffer>>;
 
-/// Trait alias for a multipart writer that returns upload status and outputs
-/// completed upload response data, primarily to make type signatures less
-/// verbose, for instance when returning an impl.
+/// Trait alias for a general form of `MultipartUpload`.
 pub trait AwsMultipartUpload<Item>
 where
     Self: FusedMultipartWrite<Item, Ret = Status, Error = UploadError, Output = CompletedUpload>,
