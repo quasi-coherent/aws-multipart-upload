@@ -42,7 +42,7 @@ like to be using, when performing multipart uploads.
 Add the crate to your Cargo.toml:
 
 ```toml
-aws-multipart-upload = "0.1.0-rc3"
+aws-multipart-upload = "0.1.0-rc4"
 ```
 
 The feature flag `"csv"` enables a "part encoder"--the component responsible for writing items to a
@@ -70,7 +70,8 @@ let upl = UploadBuilder::new(client)
     .with_uri(("example-bucket-us-east-1", "destination/key.csv"))
     .build::<Value, CsvEncoder>();
 
-/// Consume a stream of `Value`s, forwarding to `upl` and polling for completion:
+/// Consume a stream of `Value`s by forwarding it to `upl`,
+/// and poll for completion:
 let values = stream::iter(0..).map(|n| json!({"n": n, "n_sq": n * n}));
 let completed = values
     .take(100000)

@@ -1,6 +1,6 @@
 [package]
 name = "aws-multipart-upload"
-version = "0.1.0-rc3"
+version = "0.1.0-rc4"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/quasi-coherent/aws-multipart-upload"
 readme = "README.md"

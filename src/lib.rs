@@ -9,23 +9,26 @@
 //!
 //! As explained in the [README][readme], the goal of this crate is to provide an API that simplifies
 //! the process of performing S3 multipart uploads with abstractions that hide the tedious and precise
-//! details, and in a way that is easily compatible with the ubiquitous dependencies in Rust.
+//! details, and in a way that is easily compatible with the more ubiquitous dependencies from the
+//! ecosystem.
 //!
 //! The crate exports several types that implement the trait [`MultipartWrite`][multi-write], each being
 //! an aspect of the multipart upload:
 //!
-//! * A buffer for part upload request futures.
+//! * A buffer for polling part upload request futures.
 //! * A type that creates part upload request objects, pushes them to such a buffer, and completes the
 //!   upload when requested.
 //! * An interface for encoding arbitrary values in the body of a part upload request.
 //!
 //! Combined with any [`SendRequest`], these components are collected in the type [`MultipartUpload`],
 //! which is able to manage the end-to-end lifecycle of a single multipart upload, or a series of them
-//! continuing indefinitely.
+//! continuing indefinitely.  The capability is generally captured in the trait alias/abbreviation
+//! [`AwsMultipartUpload`].
 //!
 //! Combinators from the `multipart-write` crate can be used to chain and compose types here.  The
-//! extension traits [`UploadWriteExt`] and [`UploadStreamExt`] expand on this to add writers, futures,
-//! and streams as additional contexts for a multipart upload.
+//! extension traits [`UploadWriteExt`] and [`UploadStreamExt`] expand on this to allow creating
+//! general `AwsMultipartUpload`s, futures for running uploads, and streams as an additional context
+//! for a multipart upload.
 //!
 //! ## Example
 //!
@@ -104,6 +107,7 @@
 //!     }
 //! }
 //! #     Ok(())
+//! # }
 //! ```
 //!
 //! [SDK]: https://awslabs.github.io/aws-sdk-rust/
