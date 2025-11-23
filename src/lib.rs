@@ -104,6 +104,7 @@
 //!     }
 //! }
 //! #     Ok(())
+//! # }
 //! ```
 //!
 //! [SDK]: https://awslabs.github.io/aws-sdk-rust/
