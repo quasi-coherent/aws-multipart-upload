@@ -23,13 +23,6 @@ pub use json_writer::{JsonLinesBuilder, JsonLinesEncoder};
 mod lines_writer;
 pub use lines_writer::{LinesBuilder, LinesEncoder};
 
-#[cfg(feature = "parquet")]
-#[cfg_attr(docsrs, doc(cfg(feature = "parquet")))]
-mod parquet_writer;
-#[cfg(feature = "parquet")]
-#[cfg_attr(docsrs, doc(cfg(feature = "parquet")))]
-pub use parquet_writer::{ParquetBuilder, ParquetEncoder};
-
 /// Encoding for items in a part of a multipart upload.
 pub trait PartEncoder<Item> {
     /// The builder for this encoder.

@@ -42,12 +42,12 @@ like to be using, when performing multipart uploads.
 Add the crate to your Cargo.toml:
 
 ```toml
-aws-multipart-upload = "0.1.0-rc2"
+aws-multipart-upload = "0.1.0-rc3"
 ```
 
-The feature flags `"csv"` and `"parquet"` enable, respectively, part encoders that use writers from
-[`csv`][csv-docsio] and [`parquet`][parquet-docsio].  Part encoders for writing jsonlines and for
-writing arbitrary lines are available as well.
+The feature flag `"csv"` enables a "part encoder"--the component responsible for writing items to a
+part--built from a [`csv`][csv-docsio] writer.  Part encoders for writing jsonlines and for writing
+arbitrary lines of text are available as well.
 
 This example shows a stream of `serde_json::Value`s being written as comma-separated values to a
 multipart upload.  This is a future and awaiting the future runs the stream to completion by writing
@@ -83,4 +83,3 @@ println!("object uploaded: {}", completed.uri);
 
 [SDK]: https://awslabs.github.io/aws-sdk-rust/
 [csv-docsio]: https://docs.rs/csv/latest/csv/
-[parquet-docsio]: https://docs.rs/parquet/latest/parquet/index.html

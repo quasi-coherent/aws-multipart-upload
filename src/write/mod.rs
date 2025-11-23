@@ -9,7 +9,7 @@ use crate::client::part::{CompletedParts, PartBody};
 use crate::client::request::{CompletedUpload, SendUploadPart};
 use crate::codec::PartEncoder;
 use crate::error::Error as UploadError;
-use crate::uri::NewObjectUri;
+use crate::uri::ObjectUriIter;
 
 use bytesize::ByteSize;
 use futures::Stream;
@@ -43,7 +43,7 @@ impl<Item, E: PartEncoder<Item>> AwsMultipartUpload<Item> for MultipartUpload<It
 pub trait UploadWriteExt<Part>: MultipartWrite<Part> {
     /// Returns a new `MultipartWrite` that uploads to a multipart upload, using
     /// this writer as a buffer for request futures.
-    fn upload(self, client: &UploadClient, iter: NewObjectUri) -> Upload<Self>
+    fn upload(self, client: &UploadClient, iter: ObjectUriIter) -> Upload<Self>
     where
         Self: MultipartWrite<SendUploadPart, Error = UploadError, Output = CompletedParts> + Sized,
     {

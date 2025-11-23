@@ -182,13 +182,13 @@ impl Deref for EntityTag {
     type Target = str;
 
     fn deref(&self) -> &str {
-        self.0.deref()
+        &self.0
     }
 }
 
 impl AsRef<str> for EntityTag {
     fn as_ref(&self) -> &str {
-        self.deref()
+        self
     }
 }
 

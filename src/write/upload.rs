@@ -2,7 +2,7 @@ use crate::client::part::{CompletedParts, PartBody, PartNumber};
 use crate::client::request::*;
 use crate::client::{UploadClient, UploadData, UploadId};
 use crate::error::{Error as UploadError, Result};
-use crate::uri::{NewObjectUri, ObjectUri};
+use crate::uri::{ObjectUri, ObjectUriIter};
 
 use futures::ready;
 use multipart_write::{FusedMultipartWrite, MultipartWrite};
@@ -18,6 +18,8 @@ use std::task::{Context, Poll};
 pub struct UploadSent {
     /// The id of the active upload.
     pub id: UploadId,
+    /// The destination URI of the active upload.
+    pub uri: ObjectUri,
     /// The part number that was used in the part upload request.
     pub part: PartNumber,
     /// The size in bytes of the body of the part upload request.
@@ -25,9 +27,10 @@ pub struct UploadSent {
 }
 
 impl UploadSent {
-    fn new(id: &UploadId, part: PartNumber, bytes: usize) -> Self {
+    fn new(data: &UploadData, part: PartNumber, bytes: usize) -> Self {
         Self {
-            id: id.clone(),
+            id: data.get_id(),
+            uri: data.get_uri(),
             part,
             bytes: bytes as u64,
         }
@@ -36,14 +39,13 @@ impl UploadSent {
 
 /// A type to manage the lifecycle of a multipart upload.
 ///
-/// This `MultipartWrite` implementation is over the [`PartBody`] of a part
-/// upload request.  Sending a `PartBody` forms and submits the request to upload
-/// it to a multipart upload, and polling for completion completes the upload,
-/// returning the response in [`CompletedUpload`].
+/// This `MultipartWrite` sends part upload requests from the input [`PartBody`]
+/// and completes the upload when polled for completion.
 ///
-/// On completion, a new upload is created using the provided `NewObjectUri` and
-/// makes the writer available to continue writing new parts.  This continues as
-/// long as the iterator `NewObjectUri` can produce the next active upload.
+/// On completion, a new upload is created using the `ObjectUriIter` it was
+/// configured with, which makes the writer available to continue writing parts
+/// to with a new upload ID.  As long as the iterator `ObjectUriIter` can produce
+/// the next upload, this writer remains active.
 ///
 /// [`PartBody`]: crate::client::part::PartBody
 /// [`CompletedUpload`]: crate::client::request::CompletedUpload
@@ -55,13 +57,13 @@ pub struct Upload<Buf> {
     #[pin]
     fut: Option<SendCreateUpload>,
     next_uri: Option<ObjectUri>,
-    iter: NewObjectUri,
+    iter: ObjectUriIter,
 }
 
 impl<Buf> Upload<Buf> {
-    pub(crate) fn new(buf: Buf, client: &UploadClient, mut iter: NewObjectUri) -> Self {
+    pub(crate) fn new(buf: Buf, client: &UploadClient, mut iter: ObjectUriIter) -> Self {
         let inner = UploadImpl::new(buf, client);
-        let fut = iter.new_upload(client);
+        let fut = iter.next_upload(client);
         Self {
             inner,
             fut,
@@ -133,7 +135,7 @@ where
     fn poll_complete(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<Self::Output>> {
         let mut this = self.project();
         let out = ready!(this.inner.as_mut().poll_complete(cx));
-        *this.next_uri = this.iter.new_uri();
+        *this.next_uri = this.iter.next();
 
         trace!(next_uri = ?this.next_uri, "completed upload");
         Poll::Ready(out)
@@ -212,9 +214,10 @@ where
         let req = UploadPartRequest::new(data, part, pt_num);
         let fut = SendUploadPart::new(this.client, req);
         let _ = this.buf.as_mut().start_send(fut)?;
-        let sent = UploadSent::new(&data.id, pt_num, bytes);
+        let sent = UploadSent::new(data, pt_num, bytes);
         trace!(
             id = %sent.id,
+            uri = %sent.uri,
             part = %sent.part,
             bytes = sent.bytes,
             "part upload initiated",
