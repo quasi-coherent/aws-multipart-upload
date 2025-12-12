@@ -1,6 +1,6 @@
 [package]
 name = "aws-multipart-upload"
-version = "0.1.0-rc4"
+version = "0.1.0-rc5"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/quasi-coherent/aws-multipart-upload"
 readme = "README.md"
@@ -18,11 +18,11 @@ rustdoc-args = ["--cfg", "docsrs"]
 default = []
 
 [dependencies]
-aws-config = { version = "1.8.8", features = ["behavior-version-latest"] }
-aws-sdk-s3 = "1.115.0"
-bytes = "1.10.1"
+aws-config = { version = "1.8.12", features = ["behavior-version-latest"] }
+aws-sdk-s3 = "1.117"
+bytes = "1.11.0"
 bytesize = "2.3.0"
-csv = { version = "1.3.1", optional = true }
+csv = { version = "1.4.0", optional = true }
 futures = "0.3.31"
 serde = "1.0"
 serde_json = "1.0"

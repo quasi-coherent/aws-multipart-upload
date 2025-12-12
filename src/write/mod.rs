@@ -26,7 +26,7 @@ mod upload;
 pub use self::upload::{Upload, UploadSent};
 
 /// A type for creating, building, and completing a multipart upload.
-pub type MultipartUpload<Item, E> = EncodedUpload<Item, E, Upload<PartBuffer>>;
+pub type MultipartUpload<E> = EncodedUpload<E, Upload<PartBuffer>>;
 
 /// Trait alias for a general form of `MultipartUpload`.
 pub trait AwsMultipartUpload<Item>
@@ -35,7 +35,7 @@ where
 {
 }
 
-impl<Item, E: PartEncoder<Item>> AwsMultipartUpload<Item> for MultipartUpload<Item, E> {}
+impl<Item, E: PartEncoder<Item>> AwsMultipartUpload<Item> for MultipartUpload<E> {}
 
 /// Extension trait for `MultipartWrite` adding specializations for S3 uploads.
 pub trait UploadWriteExt<Part>: MultipartWrite<Part> {
@@ -51,12 +51,12 @@ pub trait UploadWriteExt<Part>: MultipartWrite<Part> {
     /// Transform this writer into one that takes an arbitrary input type and
     /// uses the encoder over this type to produce the input for a multipart
     /// upload.
-    fn encoded_upload<P, E>(
+    fn encoded_upload<E>(
         self,
-        builder: E::Builder,
+        encoder: E,
         bytes: ByteSize,
         part_bytes: ByteSize,
-    ) -> EncodedUpload<P, E, Self>
+    ) -> EncodedUpload<E, Self>
     where
         Self: MultipartWrite<
                 PartBody,
@@ -64,9 +64,8 @@ pub trait UploadWriteExt<Part>: MultipartWrite<Part> {
                 Error = UploadError,
                 Output = CompletedUpload,
             > + Sized,
-        E: PartEncoder<P>,
     {
-        EncodedUpload::new(self, builder, bytes.as_u64(), part_bytes.as_u64())
+        EncodedUpload::new(self, encoder, bytes.as_u64(), part_bytes.as_u64())
     }
 }
 
