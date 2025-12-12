@@ -32,18 +32,16 @@
 //!
 //! ## Example
 //!
-//! Generally, using the crate involves an [`UploadBuilder`] to configure several things:
+//! Generally, start with an [`UploadBuilder`], which is used to configure several things:
 //!
-//! * The uploaded object itself where applicable: target size, part size, etc.
+//! * Constraints on the uploaded object itself: target size, part size, etc.
 //! * A [`PartEncoder`][encoder] that specifies how values are written to parts.
-//! * Some [`SendRequest`][upload-client], most likely an [`SdkClient`].
+//! * Some [`SendRequest`], most likely an [`SdkClient`].
 //!
-//! Building this returns a [`MultipartUpload`], which can be used in a number of different ways.
-//! The following example shows how a `MultipartUpload` can be used more manually, in that the upload
-//! happens with explicit method calls.
-//!
-//! See the example in the [README][readme-eg] or the [examples][repo-eg] in the crate repository for
-//! other uses.
+//! Building this returns a [`MultipartUpload`] that can be used in a number of different ways.  The
+//! following example shows how a `MultipartUpload` can be used more manually, in that the upload
+//! happens with explicit method calls. More examples can be found in the [README][readme-eg] or
+//! [repository][repo-eg].
 //!
 //! ```rust
 //! # use aws_multipart_upload::{SendRequest, Status, ObjectUri, UploadBuilder, ByteSize};

@@ -27,8 +27,8 @@ Making an AWS S3 multipart upload is a fairly involved multi-stage process:
      that was used.
 3. Repeat until the upload should be completed, which typically involves tracking another counter for
    bytes written.  The request to complete the upload needs the ID, object URI, and the complete
-   collection of part number paired with entity tag.  Send the request; an empty 200 response means
-   it succeeded.
+   collection of part number paired with entity tag.  Send the request.  A 200 response has the
+   entity tag of the object (along with other metadata).
 
 The official AWS Rust SDK is generated code that exposes request builders that can be initialized
 and sent from a client, including the several mentioned above, but there isn't much beyond that.
@@ -42,20 +42,22 @@ like to be using, when performing multipart uploads.
 Add the crate to your Cargo.toml:
 
 ```toml
-aws-multipart-upload = "0.1.0-rc4"
+aws-multipart-upload = "0.1.0-rc5"
 ```
 
 The feature flag `"csv"` enables a "part encoder"--the component responsible for writing items to a
-part--built from a [`csv`][csv-docsio] writer.  Part encoders for writing jsonlines and for writing
+part--built from a [`csv`][csv-docsrs] writer.  Part encoders for writing jsonlines and for writing
 arbitrary lines of text are available as well.
 
 This example shows a stream of `serde_json::Value`s being written as comma-separated values to a
 multipart upload.  This is a future and awaiting the future runs the stream to completion by writing
 and uploading parts behind the scenes, completing the upload when the stream is exhausted.
 
+See more examples [here][repo-eg].
+
 ```rust
 use aws_multipart_upload::{ByteSize, SdkClient, UploadBuilder};
-use aws_multipart_upload::codec::{CsvBuilder, CsvEncoder};
+use aws_multipart_upload::codec::CsvEncoder;
 use aws_multipart_upload::write::UploadStreamExt as _;
 use futures::stream::{self, StreamExt as _};
 use serde_json::{Value, json};
@@ -65,10 +67,10 @@ let client = SdkClient::defaults().await;
 
 /// Use `UploadBuilder` to build a multipart uploader:
 let upl = UploadBuilder::new(client)
-    .with_encoding(CsvBuilder)
+    .with_encoder(CsvEncoder::default().with_header())
     .with_part_size(ByteSize::mib(10))
     .with_uri(("example-bucket-us-east-1", "destination/key.csv"))
-    .build::<Value, CsvEncoder>();
+    .build();
 
 /// Consume a stream of `Value`s by forwarding it to `upl`,
 /// and poll for completion:
@@ -83,4 +85,5 @@ println!("object uploaded: {}", completed.uri);
 ```
 
 [SDK]: https://awslabs.github.io/aws-sdk-rust/
-[csv-docsio]: https://docs.rs/csv/latest/csv/
+[repo-eg]: https://github.com/quasi-coherent/aws-multipart-upload/tree/master/examples
+[csv-docsrs]: https://docs.rs/csv/latest/csv/

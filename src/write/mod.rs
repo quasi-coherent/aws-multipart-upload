@@ -1,9 +1,9 @@
 //! A collection of `MultipartWrite` implementations for multipart uploads.
 //!
-//! This module contains the [`MultipartWrite`] implementations [`Upload`] and
-//! [`EncodedUpload`], components for building multipart writers like them, and
-//! extension traits for `MultipartWrite` and `Stream` providing useful
-//! combinator methods supporting multipart uploads.
+//! The module contains implementations [`Upload`] and [`EncodedUpload`],
+//! components for building multipart writers like them, and extension traits
+//! for `MultipartWrite` and `Stream` providing useful combinator methods
+//! supporting multipart uploads.
 use crate::client::UploadClient;
 use crate::client::part::{CompletedParts, PartBody};
 use crate::client::request::{CompletedUpload, SendUploadPart};
@@ -48,9 +48,11 @@ pub trait UploadWriteExt<Part>: MultipartWrite<Part> {
         Upload::new(self, client, iter)
     }
 
-    /// Transform this writer into one that takes an arbitrary input type and
-    /// uses the encoder over this type to produce the input for a multipart
-    /// upload.
+    /// Transform this `MultipartWrite` by composing a [`PartEncoder`] in front
+    /// of it, resulting in a new one over any type of value that the encoder
+    /// is capable of writing.
+    ///
+    /// [`PartEncoder`]: crate::codec::PartEncoder
     fn encoded_upload<E>(
         self,
         encoder: E,
