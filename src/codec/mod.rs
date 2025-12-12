@@ -12,27 +12,24 @@ use bytes::BufMut;
 mod csv_writer;
 #[cfg(feature = "csv")]
 #[cfg_attr(docsrs, doc(cfg(feature = "csv")))]
-pub use csv_writer::{CsvBuilder, CsvEncoder};
+pub use csv_writer::CsvEncoder;
 
 mod error;
 pub use error::{EncodeError, EncodeErrorKind};
 
 mod json_writer;
-pub use json_writer::{JsonLinesBuilder, JsonLinesEncoder};
+pub use json_writer::JsonLinesEncoder;
 
 mod lines_writer;
-pub use lines_writer::{LinesBuilder, LinesEncoder};
+pub use lines_writer::LinesEncoder;
 
 /// Encoding for items in a part of a multipart upload.
 pub trait PartEncoder<Item> {
-    /// The builder for this encoder.
-    type Builder;
-
     /// The type of value returned when encoding items is not successful.
     type Error: EncodeError;
 
-    /// Build this encoder for a new upload.
-    fn build(builder: &Self::Builder, part_size: usize) -> Result<Self, Self::Error>
+    /// Restore this encoder's state for a new upload.
+    fn restore(&self) -> Result<Self, Self::Error>
     where
         Self: Sized;
 
@@ -42,28 +39,28 @@ pub trait PartEncoder<Item> {
     /// Flush the items in any internal buffer.
     fn flush(&mut self) -> Result<(), Self::Error>;
 
-    /// Reset the encoder for a new part.
+    /// Convert the encoder to a `PartBody`.
+    fn into_body(self) -> Result<PartBody, Self::Error>;
+
+    /// Clear the encoder to prepare for a new part.
     ///
     /// Override this method to provide an alternative means of building the
-    /// encoder, for example if preparing one for a new part is different than
-    /// preparing for a new upload.
-    fn reset(builder: &Self::Builder, part_size: usize) -> Result<Self, Self::Error>
+    /// encoder in between uploads if, for example if preparing for a new part is
+    /// different than preparing for a new upload.
+    fn clear(&self) -> Result<Self, Self::Error>
     where
         Self: Sized,
     {
-        Self::build(builder, part_size)
+        self.restore()
     }
-
-    /// Convert the encoder to a `PartBody`.
-    fn into_body(self) -> Result<PartBody, Self::Error>;
 }
 
 impl<T: AsRef<[u8]>> PartEncoder<T> for PartBody {
-    type Builder = ();
     type Error = std::convert::Infallible;
 
-    fn build(_: &Self::Builder, part_size: usize) -> Result<Self, Self::Error> {
-        Ok(Self::with_capacity(part_size))
+    fn restore(&self) -> Result<Self, Self::Error> {
+        let capacity = self.capacity();
+        Ok(Self::with_capacity(capacity))
     }
 
     fn encode(&mut self, item: T) -> Result<usize, Self::Error> {

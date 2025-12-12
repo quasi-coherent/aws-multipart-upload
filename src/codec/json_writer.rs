@@ -1,21 +1,10 @@
+use crate::AWS_MIN_PART_SIZE;
 use crate::client::part::PartBody;
 use crate::codec::PartEncoder;
 
 use bytes::BufMut as _;
 use serde::Serialize;
 use std::ops::DerefMut;
-
-/// Builder for `JsonLinesEncoder`.
-#[derive(Debug, Clone, Default)]
-pub struct JsonLinesBuilder;
-
-impl JsonLinesBuilder {
-    fn build(&self, part_size: usize) -> JsonLinesEncoder {
-        JsonLinesEncoder {
-            writer: PartBody::with_capacity(part_size),
-        }
-    }
-}
 
 /// `JsonLinesEncoder` implements `PartEncoder` by writing lines of JSON to the
 /// part.
@@ -24,12 +13,29 @@ pub struct JsonLinesEncoder {
     writer: PartBody,
 }
 
+impl JsonLinesEncoder {
+    /// Create a `JsonLinesEncoder`.
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl Default for JsonLinesEncoder {
+    fn default() -> Self {
+        Self {
+            writer: PartBody::with_capacity(AWS_MIN_PART_SIZE.as_u64() as usize),
+        }
+    }
+}
+
 impl<Item: Serialize> PartEncoder<Item> for JsonLinesEncoder {
-    type Builder = JsonLinesBuilder;
     type Error = serde_json::Error;
 
-    fn build(builder: &Self::Builder, part_size: usize) -> Result<Self, Self::Error> {
-        Ok(builder.build(part_size))
+    fn restore(&self) -> Result<Self, Self::Error> {
+        let capacity = self.writer.capacity();
+        Ok(Self {
+            writer: PartBody::with_capacity(capacity),
+        })
     }
 
     fn encode(&mut self, item: Item) -> Result<usize, Self::Error> {

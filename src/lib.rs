@@ -32,15 +32,22 @@
 //!
 //! ## Example
 //!
+//! Generally, using the crate involves an [`UploadBuilder`] to configure several things:
+//!
+//! * The uploaded object itself where applicable: target size, part size, etc.
+//! * A [`PartEncoder`][encoder] that specifies how values are written to parts.
+//! * Some [`SendRequest`][upload-client], most likely an [`SdkClient`].
+//!
+//! Building this returns a [`MultipartUpload`], which can be used in a number of different ways.
 //! The following example shows how a `MultipartUpload` can be used more manually, in that the upload
-//! happens by explicit method calls.
+//! happens with explicit method calls.
 //!
 //! See the example in the [README][readme-eg] or the [examples][repo-eg] in the crate repository for
 //! other uses.
 //!
 //! ```rust
 //! # use aws_multipart_upload::{SendRequest, Status, ObjectUri, UploadBuilder, ByteSize};
-//! # use aws_multipart_upload::codec::{JsonLinesBuilder, JsonLinesEncoder};
+//! # use aws_multipart_upload::codec::JsonLinesEncoder;
 //! # use aws_multipart_upload::error::Result;
 //! # use aws_multipart_upload::request::*;
 //! # use multipart_write::MultipartWriteExt as _;
@@ -67,33 +74,33 @@
 //! # }
 //! # mod __m {
 //! use aws_multipart_upload::{ByteSize, SdkClient, UploadBuilder};
-//! use aws_multipart_upload::codec::{JsonLinesBuilder, JsonLinesEncoder};
+//! use aws_multipart_upload::codec::JsonLinesEncoder;
 //! use multipart_write::MultipartWriteExt as _;
 //! use serde_json::{Value, json};
 //! # }
 //! # async fn f() -> aws_multipart_upload::error::Result<()> {
 //!
-//! /// Build a default multipart upload client from `aws_sdk_s3::Client`.
-//! ///
-//! /// For convenience `aws_config` is re-exported, as is `aws_sdk_s3` under the
-//! /// symbol `aws_sdk`, for customization.
+//! // Build a default multipart upload client from `aws_sdk_s3::Client`.
+//! //
+//! // For convenience `aws_config` is re-exported, as is `aws_sdk_s3` under the
+//! // symbol `aws_sdk`, for customization.
 //! let client = SdkClient::defaults().await;
 //!
-//! /// Use `UploadBuilder` to make a multipart upload with target size 20 MiB,
-//! /// target part size 5 MiB, and which writes incoming `serde_json::Value`s
-//! /// to parts as jsonlines.
+//! // Use `UploadBuilder` to make a multipart upload with target size 20 MiB,
+//! // target part size 5 MiB, and which writes incoming `serde_json::Value`s
+//! // to parts as jsonlines.
 //! let mut upl = UploadBuilder::new(client)
 //!     .upload_size(ByteSize::mib(20))
 //!     .part_size(ByteSize::mib(5))
-//!     .with_encoding(JsonLinesBuilder)
+//!     .with_encoder(JsonLinesEncoder)
 //!     .with_uri(("a-bucket-us-east-1", "an/object/key.jsonl"))
-//!     .build::<Value, JsonLinesEncoder>();
+//!     .build();
 //!
-//! /// Now the uploader can have `serde_json::Value`s written to it to build a
-//! /// part of the upload.
-//! ///
-//! /// As parts reach the target size of 5 MiB, they'll be turned into a request
-//! /// body for a part upload and the request will be sent.
+//! // Now the uploader can have `serde_json::Value`s written to it to build a
+//! // part of the upload.
+//! //
+//! // As parts reach the target size of 5 MiB, they'll be turned into a request
+//! // body for a part upload and the request will be sent.
 //! for n in 0..100000 {
 //!     let item = json!({"k1": n, "k2": n.to_string()});
 //!     let status = upl.send_part(item).await?;
@@ -112,12 +119,13 @@
 //!
 //! [SDK]: https://awslabs.github.io/aws-sdk-rust/
 //! [readme]: https://github.com/quasi-coherent/aws-multipart-upload/blob/master/README.md
+//! [encoder]: self::codec::PartEncoder
 //! [multi-write]: https://docs.rs/multipart-write/latest/multipart_write/
 //! [`UploadWriteExt`]: self::write::UploadWriteExt
 //! [`UploadStreamExt`]: self::write::UploadStreamExt
 //! [readme-eg]: https://github.com/quasi-coherent/aws-multipart-upload/blob/master/README.md#Example
-//! [repo-eg]: https://github.com/quasi-coherent/aws-multipart-upload/examples
-use self::codec::{JsonLinesBuilder, PartEncoder};
+//! [repo-eg]: https://github.com/quasi-coherent/aws-multipart-upload/tree/master/examples
+use self::request::PartBody;
 use self::uri::EmptyUri;
 use self::write::{PartBuffer, UploadWriteExt};
 
@@ -171,13 +179,12 @@ const DEFAULT_MAX_PART_SIZE: ByteSize = ByteSize::mib(10);
 
 /// Configures and builds a type for multipart uploads.
 #[derive(Debug)]
-pub struct UploadBuilder<B = JsonLinesBuilder> {
+pub struct UploadBuilder<E = PartBody> {
     client: UploadClient,
     max_bytes: ByteSize,
     max_part_bytes: ByteSize,
     max_tasks: Option<usize>,
-    abort_failed: bool,
-    builder: B,
+    encoder: E,
     iter: ObjectUriIter,
 }
 
@@ -192,28 +199,26 @@ impl UploadBuilder {
             max_bytes: DEFAULT_MAX_OBJECT_SIZE,
             max_part_bytes: DEFAULT_MAX_PART_SIZE,
             max_tasks: Some(10),
-            abort_failed: false,
-            builder: JsonLinesBuilder,
+            encoder: PartBody::default(),
             iter: ObjectUriIter::new(EmptyUri),
         }
     }
 
     /// Set a builder for what will be used as an encoding for items going into
     /// a part in the multipart upload.
-    pub fn with_encoding<B>(self, builder: B) -> UploadBuilder<B> {
+    pub fn with_encoder<E>(self, encoder: E) -> UploadBuilder<E> {
         UploadBuilder {
             client: self.client,
             max_bytes: self.max_bytes,
             max_part_bytes: self.max_part_bytes,
             max_tasks: self.max_tasks,
-            abort_failed: self.abort_failed,
-            builder,
+            encoder,
             iter: self.iter,
         }
     }
 }
 
-impl<B> UploadBuilder<B> {
+impl<E> UploadBuilder<E> {
     /// Set the target size of the upload.
     pub fn upload_size(self, limit: ByteSize) -> Self {
         Self {
@@ -242,18 +247,6 @@ impl<B> UploadBuilder<B> {
         }
     }
 
-    /// Whether to call the `AbortMultipartUpload` action in case of a failed or
-    /// otherwise incomplete upload.
-    ///
-    /// To avoid accruing storage costs, an incomplete upload may be aborted, but
-    /// it may also be resumed.
-    pub fn abort_failed(self) -> Self {
-        Self {
-            abort_failed: true,
-            ..self
-        }
-    }
-
     /// Set the destination object URI for a single upload.
     ///
     /// The resulting `MultipartUpload` is only one-time-use.
@@ -274,14 +267,11 @@ impl<B> UploadBuilder<B> {
         Self { iter, ..self }
     }
 
-    /// Build a [`MultipartUpload`] from this configuration.
-    pub fn build<Item, E>(self) -> MultipartUpload<Item, E>
-    where
-        E: PartEncoder<Item, Builder = B>,
-    {
+    /// Build a `MultipartUpload` from this configuration.
+    pub fn build(self) -> MultipartUpload<E> {
         let buf = PartBuffer::new(self.max_tasks);
         buf.upload(&self.client, self.iter).encoded_upload(
-            self.builder,
+            self.encoder,
             self.max_bytes,
             self.max_part_bytes,
         )

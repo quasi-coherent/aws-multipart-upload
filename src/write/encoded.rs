@@ -88,40 +88,33 @@ impl UploadState {
 /// [`PartEncoder`]: crate::codec::PartEncoder
 #[must_use = "futures do nothing unless polled"]
 #[pin_project::pin_project]
-pub struct EncodedUpload<Item, E: PartEncoder<Item>, U> {
+pub struct EncodedUpload<E, U> {
     #[pin]
     uploader: U,
     encoder: E,
-    builder: E::Builder,
     max_bytes: u64,
     max_part_bytes: u64,
     start: Instant,
     state: UploadState,
     empty: bool,
-    _it: std::marker::PhantomData<Item>,
 }
 
-impl<Item, E: PartEncoder<Item>, U> EncodedUpload<Item, E, U> {
-    pub(crate) fn new(uploader: U, builder: E::Builder, bytes: u64, part_bytes: u64) -> Self {
-        // `part_bytes` is bounded by usize::MAX.
-        let capacity = part_bytes as usize;
-        let encoder = E::build(&builder, capacity).expect("failed to build encoder");
-
+impl<E, U> EncodedUpload<E, U> {
+    pub(crate) fn new(uploader: U, encoder: E, bytes: u64, part_bytes: u64) -> Self {
         Self {
             uploader,
             encoder,
-            builder,
             max_bytes: bytes,
             max_part_bytes: part_bytes,
             start: Instant::now(),
             state: UploadState::default(),
             empty: true,
-            _it: std::marker::PhantomData,
         }
     }
 
-    fn poll_send_body(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<()>>
+    fn poll_send_body<Item>(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<()>>
     where
+        E: PartEncoder<Item>,
         U: MultipartWrite<
                 PartBody,
                 Ret = UploadSent,
@@ -134,8 +127,7 @@ impl<Item, E: PartEncoder<Item>, U> EncodedUpload<Item, E, U> {
         match this.uploader.as_mut().poll_ready(cx)? {
             Poll::Ready(()) => {
                 this.encoder.flush()?;
-                let capacity = *this.max_part_bytes as usize;
-                let new_encoder = E::reset(this.builder, capacity)?;
+                let new_encoder = this.encoder.clear()?;
                 let encoder = std::mem::replace(this.encoder, new_encoder);
                 let body = encoder.into_body()?;
                 let ret = this.uploader.as_mut().start_send(body)?;
@@ -149,8 +141,9 @@ impl<Item, E: PartEncoder<Item>, U> EncodedUpload<Item, E, U> {
     }
 }
 
-impl<Item, E: PartEncoder<Item>, U> FusedMultipartWrite<Item> for EncodedUpload<Item, E, U>
+impl<Item, E, U> FusedMultipartWrite<Item> for EncodedUpload<E, U>
 where
+    E: PartEncoder<Item>,
     U: FusedMultipartWrite<
             PartBody,
             Ret = UploadSent,
@@ -163,8 +156,9 @@ where
     }
 }
 
-impl<Item, E: PartEncoder<Item>, U> MultipartWrite<Item> for EncodedUpload<Item, E, U>
+impl<Item, E, U> MultipartWrite<Item> for EncodedUpload<E, U>
 where
+    E: PartEncoder<Item>,
     U: MultipartWrite<PartBody, Ret = UploadSent, Error = UploadError, Output = CompletedUpload>,
 {
     type Ret = Status;
@@ -203,10 +197,7 @@ where
         }
         let mut this = self.project();
         let out = ready!(this.uploader.as_mut().poll_complete(cx))?;
-        // The `as usize` is safe because we have bounded `max_part_bytes` by
-        // usize::MAX in `UploadBuilder`.
-        let capacity = *this.max_part_bytes as usize;
-        let new_encoder = E::build(this.builder, capacity)?;
+        let new_encoder = this.encoder.restore()?;
         *this.encoder = new_encoder;
         *this.state = UploadState::default();
         *this.start = Instant::now();
@@ -214,17 +205,15 @@ where
     }
 }
 
-impl<Item, E: PartEncoder<Item>, U> Debug for EncodedUpload<Item, E, U>
+impl<E, U> Debug for EncodedUpload<E, U>
 where
     E: Debug,
-    E::Builder: Debug,
     U: Debug,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("EncodedUpload")
             .field("uploader", &self.uploader)
             .field("encoder", &self.encoder)
-            .field("builder", &self.builder)
             .field("max_bytes", &self.max_bytes)
             .field("max_part_bytes", &self.max_part_bytes)
             .field("start", &self.start)
