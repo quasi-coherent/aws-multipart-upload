@@ -16,12 +16,15 @@ mod upload_part;
 pub use upload_part::{SendUploadPart, UploadPartRequest};
 
 /// Add additional properties to the request objects being sent.
-pub trait RequestBuilder {
+pub trait RequestBuilder: Send + Sync {
     /// Set additional properties on [`CreateRequestBuilder`] beyond what
     /// [`CreateRequest`] provides.
     ///
     /// [`CreateRequest`]: self::create::CreateRequest
-    fn with_create_builder(&self, builder: CreateRequestBuilder) -> CreateRequestBuilder {
+    fn with_create_builder(
+        &self,
+        builder: CreateRequestBuilder,
+    ) -> CreateRequestBuilder {
         builder
     }
 
@@ -40,7 +43,10 @@ pub trait RequestBuilder {
     /// [`CompleteRequest`] provides.
     ///
     /// [`CompleteRequest`]: self::complete::CompleteRequest
-    fn with_complete_builder(&self, builder: CompleteRequestBuilder) -> CompleteRequestBuilder {
+    fn with_complete_builder(
+        &self,
+        builder: CompleteRequestBuilder,
+    ) -> CompleteRequestBuilder {
         builder
     }
 
@@ -48,7 +54,10 @@ pub trait RequestBuilder {
     /// [`AbortRequest`] provides.
     ///
     /// [`AbortRequest`]: self::abort::AbortRequest
-    fn with_abort_builder(&self, builder: AbortRequestBuilder) -> AbortRequestBuilder {
+    fn with_abort_builder(
+        &self,
+        builder: AbortRequestBuilder,
+    ) -> AbortRequestBuilder {
         builder
     }
 }

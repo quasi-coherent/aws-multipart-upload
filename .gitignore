@@ -3,3 +3,4 @@ target/
 .envrc
 .direnv/
 examples/.teststore/
+.DS_Store

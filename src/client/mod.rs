@@ -1,64 +1,78 @@
+use std::borrow::Cow;
+use std::fmt::{self, Formatter};
+use std::ops::Deref;
+use std::sync::Arc;
+
+use futures::future::{BoxFuture, Future};
+
 use self::part::CompletedPart;
 use self::request::*;
 use crate::create_upload::CreateMultipartUploadOutput as CreateResponse;
 use crate::error::{ErrorRepr, Result};
 use crate::uri::ObjectUri;
 
-use futures::future::LocalBoxFuture;
-use std::borrow::Cow;
-use std::fmt::{self, Formatter};
-use std::ops::Deref;
-use std::sync::Arc;
-
 pub mod part;
 pub mod request;
+
 mod sdk;
 pub use sdk::SdkClient;
 
-/// `SendRequest` represents the atomic operations in a multipart upload.
-pub trait SendRequest {
+/// `UploadApi` represents the atomic operations in a multipart upload.
+pub trait UploadApi: Send + Sync {
     /// Send a request to create a new multipart upload, returning an
     /// [`UploadData`] having the upload ID assignment.
     fn send_create_upload_request(
         &self,
         req: CreateRequest,
-    ) -> impl Future<Output = Result<UploadData>>;
+    ) -> impl Future<Output = Result<UploadData>> + Send;
 
     /// Send a request to upload a part to a multipart upload, returning the
-    /// [`CompletedPart`] containing entity tag and part number, which are required
-    /// in the subsequent complete upload request.
+    /// [`CompletedPart`] containing entity tag and part number, which are
+    /// required in the subsequent complete upload request.
     fn send_new_part_upload_request(
         &self,
         req: UploadPartRequest,
-    ) -> impl Future<Output = Result<CompletedPart>>;
+    ) -> impl Future<Output = Result<CompletedPart>> + Send;
 
     /// Send a request to complete a multipart upload, returning a
-    /// [`CompletedUpload`], which has the unique entity tag of the object as well
-    /// as the object URI.
+    /// [`CompletedUpload`], which has the unique entity tag of the object as
+    /// well as the object URI.
     fn send_complete_upload_request(
         &self,
         req: CompleteRequest,
-    ) -> impl Future<Output = Result<CompletedUpload>>;
+    ) -> impl Future<Output = Result<CompletedUpload>> + Send;
 
-    /// Send a request to abort a multipart upload returning an empty response if
-    /// successful.
-    fn send_abort_upload_request(&self, req: AbortRequest) -> impl Future<Output = Result<()>>;
+    /// Send a request to abort a multipart upload returning an empty response
+    /// if successful.
+    fn send_abort_upload_request(
+        &self,
+        req: AbortRequest,
+    ) -> impl Future<Output = Result<()>> + Send;
 }
 
-impl<D, T> SendRequest for T
+impl<D, T> UploadApi for T
 where
-    D: SendRequest,
-    T: Deref<Target = D>,
+    D: UploadApi,
+    T: Deref<Target = D> + Send + Sync,
 {
-    async fn send_create_upload_request(&self, req: CreateRequest) -> Result<UploadData> {
+    async fn send_create_upload_request(
+        &self,
+        req: CreateRequest,
+    ) -> Result<UploadData> {
         self.deref().send_create_upload_request(req).await
     }
 
-    async fn send_new_part_upload_request(&self, req: UploadPartRequest) -> Result<CompletedPart> {
+    async fn send_new_part_upload_request(
+        &self,
+        req: UploadPartRequest,
+    ) -> Result<CompletedPart> {
         self.deref().send_new_part_upload_request(req).await
     }
 
-    async fn send_complete_upload_request(&self, req: CompleteRequest) -> Result<CompletedUpload> {
+    async fn send_complete_upload_request(
+        &self,
+        req: CompleteRequest,
+    ) -> Result<CompletedUpload> {
         self.deref().send_complete_upload_request(req).await
     }
 
@@ -69,36 +83,43 @@ where
 
 /// A client of the multipart upload API.
 ///
-/// This can be built from any type that implements `SendRequest`, such as the
+/// This can be built from any type that implements `UploadApi`, such as the
 /// [`SdkClient`].
 #[derive(Clone)]
 pub struct UploadClient {
-    pub(crate) inner: Arc<dyn BoxedSendRequest>,
+    pub(crate) inner: Arc<dyn BoxedUploadApi>,
 }
 
 impl UploadClient {
     /// Create a new `UploadClient`.
     pub fn new<C>(client: C) -> Self
     where
-        C: SendRequest + 'static,
+        C: UploadApi + 'static,
     {
-        let inner = SendRequestInner::new(client);
-        Self {
-            inner: Arc::new(inner),
-        }
+        let inner = UploadApiInner::new(client);
+        Self { inner: Arc::new(inner) }
     }
 }
 
-impl SendRequest for UploadClient {
-    async fn send_create_upload_request(&self, req: CreateRequest) -> Result<UploadData> {
+impl UploadApi for UploadClient {
+    async fn send_create_upload_request(
+        &self,
+        req: CreateRequest,
+    ) -> Result<UploadData> {
         self.inner.send_create_upload(req).await
     }
 
-    async fn send_new_part_upload_request(&self, req: UploadPartRequest) -> Result<CompletedPart> {
+    async fn send_new_part_upload_request(
+        &self,
+        req: UploadPartRequest,
+    ) -> Result<CompletedPart> {
         self.inner.send_upload_part(req).await
     }
 
-    async fn send_complete_upload_request(&self, req: CompleteRequest) -> Result<CompletedUpload> {
+    async fn send_complete_upload_request(
+        &self,
+        req: CompleteRequest,
+    ) -> Result<CompletedUpload> {
         self.inner.send_complete_upload(req).await
     }
 
@@ -109,9 +130,7 @@ impl SendRequest for UploadClient {
 
 impl fmt::Debug for UploadClient {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_struct("UploadClient")
-            .field("inner", &"SendRequest")
-            .finish()
+        f.debug_struct("UploadClient").field("inner", &"UploadApi").finish()
     }
 }
 
@@ -124,7 +143,9 @@ impl UploadId {
         Self(id.into())
     }
 
-    pub(crate) fn try_from_create_resp(value: &CreateResponse) -> Result<Self, ErrorRepr> {
+    pub(crate) fn try_from_create_resp(
+        value: &CreateResponse,
+    ) -> Result<Self, ErrorRepr> {
         value
             .upload_id
             .as_deref()
@@ -163,39 +184,36 @@ impl From<String> for UploadId {
     }
 }
 
-/// Data identifying a multipart upload.
-///
-/// The `UploadId` assigned by AWS and the `ObjectUri` that the user created the
-/// upload with are required properties of any of the upload client's operations.
-///
-/// The [`SendCreateUpload`] request future resolves to this type if the request
-/// was successful.
-///
-/// [`SendCreateUpload`]: self::request::SendCreateUpload
-#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+/// Identifying metadata of a multipart upload.
+#[derive(Debug, Clone)]
 pub struct UploadData {
-    /// The ID for the upload assigned by AWS.
-    pub id: UploadId,
-    /// The S3 URI of the object being uploaded.
-    pub uri: ObjectUri,
+    pub(crate) id: UploadId,
+    pub(crate) uri: ObjectUri,
 }
 
 impl UploadData {
-    /// Create a new value from an upload ID and object URI.
+    /// Initialize from upload ID and object URI.
     pub fn new<T, U>(id: T, uri: U) -> Self
     where
         T: Into<UploadId>,
         U: Into<ObjectUri>,
     {
-        Self {
-            id: id.into(),
-            uri: uri.into(),
-        }
+        Self { id: id.into(), uri: uri.into() }
+    }
+
+    /// Get a reference to the upload ID.
+    pub fn id_ref(&self) -> &UploadId {
+        &self.id
     }
 
     /// Get an owned upload ID.
     pub fn get_id(&self) -> UploadId {
         self.id.clone()
+    }
+
+    /// Get a reference to the object URI.
+    pub fn uri_ref(&self) -> &ObjectUri {
+        &self.uri
     }
 
     /// Get an owned object URI.
@@ -204,51 +222,63 @@ impl UploadData {
     }
 }
 
-/// Object-safe `SendRequest`.
-pub(crate) trait BoxedSendRequest {
-    fn send_create_upload(&self, req: CreateRequest) -> LocalBoxFuture<'_, Result<UploadData>>;
+/// Object-safe `UploadApi`.
+pub(crate) trait BoxedUploadApi: Send + Sync {
+    fn send_create_upload(
+        &self,
+        req: CreateRequest,
+    ) -> BoxFuture<'_, Result<UploadData>>;
 
-    fn send_upload_part(&self, req: UploadPartRequest)
-    -> LocalBoxFuture<'_, Result<CompletedPart>>;
+    fn send_upload_part(
+        &self,
+        req: UploadPartRequest,
+    ) -> BoxFuture<'_, Result<CompletedPart>>;
 
     fn send_complete_upload(
         &self,
         req: CompleteRequest,
-    ) -> LocalBoxFuture<'_, Result<CompletedUpload>>;
+    ) -> BoxFuture<'_, Result<CompletedUpload>>;
 
-    fn send_abort_upload(&self, req: AbortRequest) -> LocalBoxFuture<'_, Result<()>>;
+    fn send_abort_upload(&self, req: AbortRequest)
+    -> BoxFuture<'_, Result<()>>;
 }
 
-/// Implements `BoxedSendRequest` for any `T: SendRequest` so that we can
+/// Implements `BoxedUploadApi` for any `T: UploadApi` so that we can
 /// construct `UploadClient`.
-struct SendRequestInner<T>(T);
+struct UploadApiInner<T>(T);
 
-impl<T: SendRequest> SendRequestInner<T> {
+impl<T: UploadApi> UploadApiInner<T> {
     pub(super) fn new(inner: T) -> Self {
         Self(inner)
     }
 }
 
-impl<T: SendRequest> BoxedSendRequest for SendRequestInner<T> {
-    fn send_create_upload(&self, req: CreateRequest) -> LocalBoxFuture<'_, Result<UploadData>> {
+impl<T: UploadApi> BoxedUploadApi for UploadApiInner<T> {
+    fn send_create_upload(
+        &self,
+        req: CreateRequest,
+    ) -> BoxFuture<'_, Result<UploadData>> {
         Box::pin(self.0.send_create_upload_request(req))
     }
 
     fn send_upload_part(
         &self,
         req: UploadPartRequest,
-    ) -> LocalBoxFuture<'_, Result<CompletedPart>> {
+    ) -> BoxFuture<'_, Result<CompletedPart>> {
         Box::pin(self.0.send_new_part_upload_request(req))
     }
 
     fn send_complete_upload(
         &self,
         req: CompleteRequest,
-    ) -> LocalBoxFuture<'_, Result<CompletedUpload>> {
+    ) -> BoxFuture<'_, Result<CompletedUpload>> {
         Box::pin(self.0.send_complete_upload_request(req))
     }
 
-    fn send_abort_upload(&self, req: AbortRequest) -> LocalBoxFuture<'_, Result<()>> {
+    fn send_abort_upload(
+        &self,
+        req: AbortRequest,
+    ) -> BoxFuture<'_, Result<()>> {
         Box::pin(self.0.send_abort_upload_request(req))
     }
 }
