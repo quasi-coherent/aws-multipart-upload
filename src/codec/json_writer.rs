@@ -1,10 +1,11 @@
-use crate::AWS_MIN_PART_SIZE;
-use crate::client::part::PartBody;
-use crate::codec::PartEncoder;
+use std::ops::DerefMut;
 
 use bytes::BufMut as _;
 use serde::Serialize;
-use std::ops::DerefMut;
+
+use crate::client::part::PartBody;
+use crate::codec::PartEncoder;
+use crate::upload::AWS_MIN_PART_SIZE;
 
 /// `JsonLinesEncoder` implements `PartEncoder` by writing lines of JSON to the
 /// part.
@@ -31,11 +32,9 @@ impl Default for JsonLinesEncoder {
 impl<Item: Serialize> PartEncoder<Item> for JsonLinesEncoder {
     type Error = serde_json::Error;
 
-    fn restore(&self) -> Result<Self, Self::Error> {
+    fn new_upload(&self) -> Result<Self, Self::Error> {
         let capacity = self.writer.capacity();
-        Ok(Self {
-            writer: PartBody::with_capacity(capacity),
-        })
+        Ok(Self { writer: PartBody::with_capacity(capacity) })
     }
 
     fn encode(&mut self, item: Item) -> Result<usize, Self::Error> {

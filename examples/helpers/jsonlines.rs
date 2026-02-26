@@ -1,22 +1,22 @@
-use super::{Config, iter_uri, sdk_client};
-
 use aws_multipart_upload::codec::JsonLinesEncoder;
-use aws_multipart_upload::{ByteSize, MultipartUpload, UploadBuilder};
+use aws_multipart_upload::{ByteSize, Upload, UploadBuilder};
+
+use super::{Config, iter_uri, sdk_client};
 
 #[derive(Debug, Clone, Copy)]
 pub struct JsonLinesExample;
 
 impl JsonLinesExample {
-    pub async fn upload(config: Config) -> MultipartUpload<JsonLinesEncoder> {
+    pub async fn upload(config: Config) -> Upload<JsonLinesEncoder> {
         let iter = iter_uri(config.num_uploads, "jsonlines", "jsonl");
         let client = sdk_client().await;
 
         UploadBuilder::new(client)
-            .max_active_tasks(config.max_tasks)
-            .upload_size(ByteSize::mib(config.upload_mib))
-            .part_size(ByteSize::mib(config.part_mib))
+            .with_upload_size(ByteSize::mib(config.upload_mib))
+            .with_part_size(ByteSize::mib(config.part_mib))
             .with_encoder(JsonLinesEncoder::new())
             .with_uri_iter(iter)
+            .with_capacity(config.max_tasks)
             .build()
     }
 }

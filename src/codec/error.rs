@@ -63,9 +63,8 @@ impl EncodeError for serde_json::Error {
 
     fn kind(&self) -> EncodeErrorKind {
         match self.classify() {
-            serde_json::error::Category::Data | serde_json::error::Category::Syntax => {
-                EncodeErrorKind::Data
-            }
+            serde_json::error::Category::Data
+            | serde_json::error::Category::Syntax => EncodeErrorKind::Data,
             serde_json::error::Category::Eof => EncodeErrorKind::Eof,
             serde_json::error::Category::Io => EncodeErrorKind::Io,
         }

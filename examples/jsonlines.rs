@@ -1,5 +1,5 @@
-use aws_multipart_upload::write::UploadStreamExt as _;
-use futures::StreamExt as _;
+use aws_multipart_upload::stream::UploadStreamExt as _;
+use futures::TryStreamExt as _;
 
 pub mod helpers;
 pub use helpers::*;
@@ -10,13 +10,15 @@ async fn main() {
     let config = Config::default();
     let upload = jsonlines::JsonLinesExample::upload(config).await;
 
-    UserLogin::stream()
-        .into_upload(upload)
-        .for_each(|res| async move {
-            match res {
-                Ok(completed) => println!("successfully completed upload: {completed:?}"),
-                Err(e) => println!("error in multipart upload: {e}"),
-            }
+    if let Err(e) = UserLogin::stream()
+        .try_upload(upload)
+        .try_for_each(|completed| async move {
+            tracing::info!(?completed, "completed upload");
+            Ok(())
         })
-        .await;
+        .await
+    {
+        tracing::error!(error = %e, "error found in upload");
+        std::process::exit(1);
+    }
 }

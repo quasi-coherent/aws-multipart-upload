@@ -1,9 +1,11 @@
+use aws_config::ConfigLoader;
+
 use crate::client::part::{CompletedPart, EntityTag};
 use crate::client::request::*;
-use crate::client::{DefaultRequestBuilder, RequestBuilder, SendRequest, UploadData, UploadId};
-use crate::error::{ErrorRepr, Result, UploadContext as _};
-
-use aws_config::ConfigLoader;
+use crate::client::{
+    DefaultRequestBuilder, RequestBuilder, UploadApi, UploadData, UploadId,
+};
+use crate::error::{ErrorRepr, ErrorWithUpload as _, Result};
 
 /// AWS S3 SDK client.
 ///
@@ -40,8 +42,16 @@ impl SdkClient {
     }
 
     /// Set a request builder for this S3 client.
-    pub fn request_builder<B: RequestBuilder>(self, builder: B) -> SdkClient<B> {
+    pub fn with_request_builder<B: RequestBuilder>(
+        self,
+        builder: B,
+    ) -> SdkClient<B> {
         SdkClient(self.0, builder)
+    }
+
+    /// Return a reference to the underlying S3 client.
+    pub fn client_ref(&self) -> &aws_sdk::Client {
+        &self.0
     }
 }
 
@@ -71,20 +81,21 @@ impl<B: RequestBuilder> SdkClient<B> {
     }
 }
 
-impl<B: RequestBuilder> SendRequest for SdkClient<B> {
-    async fn send_create_upload_request(&self, req: CreateRequest) -> Result<UploadData> {
+impl<B: RequestBuilder> UploadApi for SdkClient<B> {
+    async fn send_create_upload_request(
+        &self,
+        req: CreateRequest,
+    ) -> Result<UploadData> {
         req.validate()?;
         let base = self.new_create_builder();
         let builder = req.with_builder(base);
         let request = self.1.with_create_builder(builder);
-
         let uri = req.uri();
         let id = request
             .send()
             .await
             .map_err(ErrorRepr::from)
             .and_then(|resp| UploadId::try_from_create_resp(&resp))?;
-
         Ok(UploadData::new(id, uri.clone()))
     }
 
@@ -94,40 +105,35 @@ impl<B: RequestBuilder> SendRequest for SdkClient<B> {
     ) -> Result<CompletedPart> {
         req.validate()?;
         let part_size = req.body.size();
-
         let base = self.new_part_builder();
         let builder = req.with_builder(base);
         let request = self.1.with_upload_part_builder(builder);
-
-        let id = req.id();
-        let uri = req.uri();
         let part = req.part_number();
         let etag = request
             .send()
             .await
             .map_err(ErrorRepr::from)
-            .and_then(|resp| EntityTag::try_from_upload_resp(&resp))
-            .upload_ctx(id, uri, part)?;
-
-        Ok(CompletedPart::new(id.clone(), etag, part, part_size))
+            .and_then(|resp| EntityTag::try_from_upload_resp(&resp))?;
+        Ok(CompletedPart::new(etag, part, part_size))
     }
 
-    async fn send_complete_upload_request(&self, req: CompleteRequest) -> Result<CompletedUpload> {
+    async fn send_complete_upload_request(
+        &self,
+        req: CompleteRequest,
+    ) -> Result<CompletedUpload> {
         req.validate()?;
         let base = self.new_complete_builder();
         let builder = req.with_builder(base);
         let request = self.1.with_complete_builder(builder);
-
         let id = req.id();
         let uri = req.uri();
-        let part = req.completed_parts.max_part_number();
+        let completed = req.completed_parts();
         let etag = request
             .send()
             .await
             .map_err(ErrorRepr::from)
             .and_then(|resp| EntityTag::try_from_complete_resp(&resp))
-            .upload_ctx(id, uri, part)?;
-
+            .err_with_upl(id, uri, completed)?;
         Ok(CompletedUpload::new(uri.clone(), etag))
     }
 

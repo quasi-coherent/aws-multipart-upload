@@ -23,11 +23,7 @@ impl UserLogin {
             user_id: n % 50,
             display_name: format!("user_{}", n % 50),
             timestamp: Utc::now(),
-            outcome: if n % 24 == 0 {
-                Outcome::Deny
-            } else {
-                Outcome::Success
-            },
+            outcome: if n % 24 == 0 { Outcome::Deny } else { Outcome::Success },
         })
     }
 }

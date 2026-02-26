@@ -1,13 +1,18 @@
-//! `ObjectUri` iterators.
+//! Provides `ObjectUri` functionality.
 //!
-//! This module provides types that can help in building iterators of URIs for
-//! a multipart upload type with [`ObjectUriIter`].
+//! The only thing required to create a new upload is the URI, or bucket and
+//! key, of the object to be uploaded. An iterator of `ObjectUri` therefore
+//! creates a sequence of multipart uploads by using the `next` value to create
+//! a next upload when one completes.
 //!
-//! The only thing required to create a new upload is the URI of the object to be
-//! uploaded, so given an iterator of `ObjectUri`s, this defines a sequence of
-//! multipart uploads that can be created as the previous one is completed by
-//! calling `next` on the iterator.  [`OneTimeUse`], an iterator that only
-//! produces one `ObjectUri`, is capable of serving a single multipart upload.
+//! [`ObjectUriIter`] can be given such an iterator and then be handed to an
+//! upload, which will use it to create, build, complete, then create a next
+//! upload. This will continue indefinitely, or as long as the iterator can
+//! produce the `next` value.  This allows an upload to work in a stream where
+//! the aim is to consume the stream by writing it to S3 for perpetuity.
+//!
+//! In case there should be only one upload, [`OneTimeUse`] only returns the
+//! value it was created with.
 //!
 //! # Example
 //!
@@ -15,7 +20,8 @@
 //! current date and time.
 //!
 //! ```rust
-//! use aws_multipart_upload::uri::{KeyPrefix, ObjectUriIter, ObjectUriIterExt};
+//! use aws_multipart_upload::uri::{KeyPrefix, ObjectUriIterExt};
+//! use aws_multipart_upload::ObjectUriIter;
 //!
 //! const BUCKET: &str = "my-bucket";
 //! const PREFIX: &str = "static/object/prefix";
@@ -29,53 +35,19 @@
 //!     prefix.to_key(&root)
 //! });
 //!
-//! let mut uri = ObjectUriIter::uri_iter(iter);
-//! let new_uri = uri.new_uri().unwrap();
+//! let mut uri = ObjectUriIter::new(iter);
+//! let new_uri = uri.next().unwrap();
 //!
 //! println!("{new_uri}");
 //! // "s3://my-bucket/static/object/prefix/2025/11/11/11/01/1763683634194850.csv"
 //! ```
 //! [`ObjectUriIter`]: super::ObjectUriIter
-use crate::client::UploadClient;
-use crate::client::request::{CreateRequest, SendCreateUpload};
-
 use std::borrow::Cow;
 use std::fmt::{self, Formatter};
 use std::ops::Deref;
 
-/// The address of an uploaded object in S3.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
-pub struct ObjectUri {
-    /// The S3 bucket for the object.
-    ///
-    /// This should be the plain bucket name, e.g., "my-s3-bucket".
-    pub bucket: Bucket,
-    /// The full key of this object within the bucket.
-    pub key: Key,
-}
-
-impl ObjectUri {
-    /// Create a new `ObjectUri` from bucket and object key.
-    pub fn new(bucket: Bucket, key: Key) -> Self {
-        Self { bucket, key }
-    }
-
-    pub(crate) fn is_empty(&self) -> bool {
-        self.bucket.is_empty() || self.key.is_empty()
-    }
-}
-
-impl fmt::Display for ObjectUri {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "s3://{}/{}", &self.bucket, &self.key)
-    }
-}
-
-impl<T: Into<Bucket>, U: Into<Key>> From<(T, U)> for ObjectUri {
-    fn from((b, k): (T, U)) -> Self {
-        ObjectUri::new(b.into(), k.into())
-    }
-}
+use crate::client::UploadClient;
+use crate::client::request::{CreateRequest, SendCreateUpload};
 
 /// The destination bucket for this upload when it is complete.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
@@ -128,6 +100,12 @@ impl From<String> for Bucket {
     }
 }
 
+impl From<Cow<'static, str>> for Bucket {
+    fn from(value: Cow<'static, str>) -> Self {
+        Self(value)
+    }
+}
+
 /// The key within the associated bucket for this object.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct Key(Cow<'static, str>);
@@ -172,6 +150,12 @@ impl From<&str> for Key {
 impl From<String> for Key {
     fn from(value: String) -> Self {
         Self(Cow::Owned(value))
+    }
+}
+
+impl From<Cow<'static, str>> for Key {
+    fn from(value: Cow<'static, str>) -> Self {
+        Self(value)
     }
 }
 
@@ -232,6 +216,56 @@ impl From<String> for KeyPrefix {
     }
 }
 
+impl From<Cow<'static, str>> for KeyPrefix {
+    fn from(value: Cow<'static, str>) -> Self {
+        Self(value)
+    }
+}
+
+/// The address of an uploaded object in S3.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+pub struct ObjectUri {
+    /// The S3 bucket for the object.
+    ///
+    /// This should be the plain bucket name, e.g., "my-s3-bucket".
+    pub bucket: Bucket,
+    /// The full key of this object within the bucket.
+    pub key: Key,
+}
+
+impl ObjectUri {
+    /// Create a new `ObjectUri` from bucket and object key.
+    pub fn new<B: Into<Bucket>, K: Into<Key>>(bucket: B, key: K) -> Self {
+        Self { bucket: bucket.into(), key: key.into() }
+    }
+
+    /// Returns a reference to the bucket.
+    pub fn bucket(&self) -> &Bucket {
+        &self.bucket
+    }
+
+    /// Returns a reference to the object key.
+    pub fn key(&self) -> &Key {
+        &self.key
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.bucket.is_empty() || self.key.is_empty()
+    }
+}
+
+impl fmt::Display for ObjectUri {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "s3://{}/{}", &self.bucket, &self.key)
+    }
+}
+
+impl<T: Into<Bucket>, U: Into<Key>> From<(T, U)> for ObjectUri {
+    fn from((b, k): (T, U)) -> Self {
+        ObjectUri::new(b.into(), k.into())
+    }
+}
+
 /// Produce an `ObjectUri` for a new upload from an iterator.
 pub struct ObjectUriIter {
     inner: Box<dyn Iterator<Item = ObjectUri>>,
@@ -243,14 +277,15 @@ impl ObjectUriIter {
     where
         I: IntoIterator<Item = ObjectUri> + 'static,
     {
-        Self {
-            inner: Box::new(iter.into_iter()),
-        }
+        Self { inner: Box::new(iter.into_iter()) }
     }
 
     /// Construct the request future to create a new multipart upload using the
     /// next `ObjectUri` produced by this `ObjectUriIter` value.
-    pub fn next_upload(&mut self, client: &UploadClient) -> Option<SendCreateUpload> {
+    pub fn next_upload(
+        &mut self,
+        client: &UploadClient,
+    ) -> Option<SendCreateUpload> {
         let uri = self.next()?;
         let req = CreateRequest::new(uri);
         let fut = SendCreateUpload::new(client, req);
@@ -266,6 +301,7 @@ impl Default for ObjectUriIter {
 
 impl Iterator for ObjectUriIter {
     type Item = ObjectUri;
+
     fn next(&mut self) -> Option<Self::Item> {
         self.inner.next()
     }
@@ -273,9 +309,7 @@ impl Iterator for ObjectUriIter {
 
 impl fmt::Debug for ObjectUriIter {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ObjectUriIter")
-            .field("inner", &"Iterator<Item = ObjectUri>")
-            .finish()
+        f.debug_struct("ObjectUriIter").finish()
     }
 }
 
@@ -304,11 +338,7 @@ pub struct MapKey<I, F> {
 
 impl<I, F> MapKey<I, F> {
     fn new<B: Into<Bucket>>(inner: I, bucket: B, f: F) -> Self {
-        Self {
-            inner,
-            bucket: bucket.into(),
-            f,
-        }
+        Self { inner, bucket: bucket.into(), f }
     }
 }
 
@@ -330,6 +360,7 @@ where
 /// An empty iterator of `ObjectUri`s.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct EmptyUri;
+
 impl IntoIterator for EmptyUri {
     type IntoIter = std::iter::Empty<ObjectUri>;
     type Item = ObjectUri;
@@ -352,6 +383,7 @@ impl OneTimeUse {
 
 impl Iterator for OneTimeUse {
     type Item = ObjectUri;
+
     fn next(&mut self) -> Option<Self::Item> {
         self.0.take()
     }

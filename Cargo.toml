@@ -1,6 +1,6 @@
 [package]
 name = "aws-multipart-upload"
-version = "0.1.0-rc5"
+version = "0.1.0-rc6"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/quasi-coherent/aws-multipart-upload"
 readme = "README.md"
@@ -8,7 +8,7 @@ description = "SDK plugin for S3 multipart uploads"
 edition = "2024"
 authors = ["Daniel Donohue <d.michael.donohue@gmail.com>"]
 keywords = ["aws", "s3", "multipart", "upload"]
-rust-version = "1.88.0"
+rust-version = "1.91.1"
 
 [package.metadata.docs.rs]
 all-features = true
@@ -18,21 +18,22 @@ rustdoc-args = ["--cfg", "docsrs"]
 default = []
 
 [dependencies]
-aws-config = { version = "1.8.12", features = ["behavior-version-latest"] }
-aws-sdk-s3 = "1.117"
+aws-config = { version = "1.8.15", features = ["behavior-version-latest"] }
+aws-sdk-s3 = "1.125.0"
 bytes = "1.11.0"
 bytesize = "2.3.0"
 csv = { version = "1.4.0", optional = true }
-futures = "0.3.31"
+futures = "0.3.32"
+multipart-write = "0.1.0-rc7"
+pin-project = "1.1.11"
 serde = "1.0"
 serde_json = "1.0"
-multipart-write = "0.1.0-rc5"
-pin-project = "1.1.10"
-thiserror = "2.0.14"
-tracing = { version = "0.1.41", optional = true }
+thiserror = "2.0.18"
+tracing = { version = "0.1.44", optional = true }
 
 [dev-dependencies]
 chrono = { version = "0.4.42", features = ["serde"] }
+serde = { version = "1.0", features = ["derive"] }
 tokio = { version = "1", default-features = false, features = ["macros", "rt-multi-thread"] }
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 

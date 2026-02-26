@@ -1,10 +1,10 @@
-use crate::AWS_MIN_PART_SIZE;
-use crate::client::part::PartBody;
-use crate::codec::{EncodeError, EncodeErrorKind, PartEncoder};
-
 use bytesize::ByteSize;
 use csv::{Error as CsvError, Writer, WriterBuilder};
 use serde::Serialize;
+
+use crate::client::part::PartBody;
+use crate::codec::{EncodeError, EncodeErrorKind, PartEncoder};
+use crate::upload::AWS_MIN_PART_SIZE;
 
 /// `CsvEncoder` implements `PartEncoder` by writing items to the part in CSV
 /// format.
@@ -18,18 +18,12 @@ pub struct CsvEncoder {
 impl CsvEncoder {
     /// Write a header row from the item as the first line in the upload.
     pub fn with_header(self) -> Self {
-        Self {
-            write_header: true,
-            ..self
-        }
+        Self { write_header: true, ..self }
     }
 
     /// Initial capacity allocated for the CSV writer.
     pub fn with_capacity(self, capacity: ByteSize) -> Self {
-        Self {
-            capacity: capacity.as_u64(),
-            ..self
-        }
+        Self { capacity: capacity.as_u64(), ..self }
     }
 }
 
@@ -42,33 +36,25 @@ impl Default for CsvEncoder {
             .buffer_capacity(capacity as usize)
             .has_headers(false)
             .from_writer(part);
-
-        Self {
-            writer,
-            write_header: false,
-            capacity,
-        }
+        Self { writer, write_header: false, capacity }
     }
 }
 
 impl<Item: Serialize> PartEncoder<Item> for CsvEncoder {
     type Error = CsvError;
 
-    fn restore(&self) -> Result<Self, Self::Error> {
+    fn new_upload(&self) -> Result<Self, Self::Error> {
         let cap = self.writer.get_ref().capacity();
         let part = PartBody::with_capacity(cap);
         let mut builder = WriterBuilder::new();
         let writer = if self.write_header {
-            builder
-                .buffer_capacity(self.capacity as usize)
-                .from_writer(part)
+            builder.buffer_capacity(self.capacity as usize).from_writer(part)
         } else {
             builder
                 .buffer_capacity(self.capacity as usize)
                 .has_headers(false)
                 .from_writer(part)
         };
-
         Ok(Self {
             writer,
             write_header: self.write_header,
@@ -96,7 +82,7 @@ impl<Item: Serialize> PartEncoder<Item> for CsvEncoder {
         }
     }
 
-    fn clear(&self) -> Result<Self, Self::Error> {
+    fn new_part(&self) -> Result<Self, Self::Error> {
         let cap = self.writer.get_ref().capacity();
         let part = PartBody::with_capacity(cap);
         let mut builder = WriterBuilder::new();

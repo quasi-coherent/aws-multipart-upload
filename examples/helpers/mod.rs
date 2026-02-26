@@ -2,7 +2,8 @@ use aws_multipart_upload::SdkClient;
 use aws_multipart_upload::uri::{KeyPrefix, ObjectUri, ObjectUriIterExt as _};
 use chrono::Utc;
 use tracing_subscriber::filter::{EnvFilter, LevelFilter};
-use tracing_subscriber::{fmt, prelude::*};
+use tracing_subscriber::fmt;
+use tracing_subscriber::prelude::*;
 
 mod user_stream;
 pub use user_stream::*;
@@ -26,25 +27,17 @@ pub struct Config {
 
 impl Default for Config {
     fn default() -> Self {
-        Self {
-            upload_mib: 25,
-            part_mib: 5,
-            num_uploads: 3,
-            max_tasks: 15,
-        }
+        Self { upload_mib: 20, part_mib: 5, num_uploads: 3, max_tasks: 15 }
     }
 }
 
 pub fn init_tracer() {
     let filter = EnvFilter::builder()
-        .with_default_directive(LevelFilter::WARN.into())
-        .parse("aws_multipart_upload=trace")
+        .with_default_directive(LevelFilter::INFO.into())
+        .parse("aws_multipart_upload=trace,csv=info,jsonlines=info")
         .unwrap();
 
-    tracing_subscriber::registry()
-        .with(fmt::layer())
-        .with(filter)
-        .init();
+    tracing_subscriber::registry().with(fmt::layer()).with(filter).init();
 }
 
 async fn sdk_client() -> SdkClient {
@@ -59,7 +52,11 @@ async fn sdk_client() -> SdkClient {
 /// Used to produce the next destination for an upload when one finishes.
 /// In this example we `take(self.num_uploads)` from this iterator to
 /// make it finite.
-fn iter_uri(limit: usize, v: &'static str, ext: &'static str) -> impl Iterator<Item = ObjectUri> {
+fn iter_uri(
+    limit: usize,
+    v: &'static str,
+    ext: &'static str,
+) -> impl Iterator<Item = ObjectUri> {
     std::iter::repeat_with(|| KeyPrefix::from(PREFIX))
         .map_key(BUCKET, move |prefix| {
             let now = Utc::now();

@@ -1,19 +1,21 @@
-use super::UploadId;
-use crate::complete_upload::CompleteMultipartUploadOutput as CompleteResponse;
-use crate::error::{ErrorRepr, Result};
-use crate::part_upload::UploadPartOutput as UploadResponse;
-
-use aws_sdk_s3::primitives::ByteStream;
-use bytes::{BufMut as _, BytesMut};
 use std::borrow::Cow;
+use std::collections::BTreeMap;
 use std::fmt::{self, Display, Formatter};
 use std::io::{Result as IoResult, Write};
 use std::ops::{Deref, DerefMut};
 
+use aws_sdk_s3::primitives::ByteStream;
+use bytes::{BufMut as _, BytesMut};
+
+use crate::complete_upload::CompleteMultipartUploadOutput as CompleteResponse;
+use crate::error::{ErrorRepr, Result};
+use crate::part_upload::UploadPartOutput as UploadResponse;
+
 /// Body of the multipart upload request.
 ///
-/// This type dereferences to [`BytesMut`], so in particular supports the methods
-/// of [`BufMut`], which is the preferred way of writing data to a `PartBody`.
+/// This type dereferences to [`BytesMut`], so in particular supports the
+/// methods of [`BufMut`], which is the preferred way of writing data to a
+/// `PartBody`.
 ///
 /// `PartBody` also implements [`Write`], so it can also be used in combination
 /// with the class of external writer types that are parametrized by `Write`.
@@ -95,34 +97,45 @@ impl AsRef<[u8]> for PartBody {
 /// This, along with the entity tag found in the response, is required in the
 /// request to complete a multipart upload because it identifies the where the
 /// part goes when assembling the full object.
+///
+/// The `Default` behavior is to start with the part number `1`.  This is
+/// because it is a requirement of the API that a part number be an integer
+/// between 1 and 10,000.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PartNumber(i32);
+
+impl PartNumber {
+    /// Initializes the part number at 1, which is a requirement of the API.
+    pub fn new() -> Self {
+        Self(1)
+    }
+
+    /// Create a new `PartNumber` starting with `n`.
+    ///
+    /// Used when resuming an upload that was suspended with completed parts.
+    ///
+    /// For a new upload, use [`Self::new`].
+    pub fn start_with(n: i32) -> Self {
+        Self(n)
+    }
+
+    /// Returns whether this is valid to AWS API.
+    pub fn is_valid(&self) -> bool {
+        let PartNumber(n) = self;
+        *n > 0
+    }
+
+    /// Increment the `PartNumber` by 1, returning the previous part number.
+    pub fn fetch_incr(&mut self) -> PartNumber {
+        let curr = PartNumber(self.0);
+        self.0 += 1;
+        curr
+    }
+}
 
 impl Default for PartNumber {
     fn default() -> Self {
         Self(1)
-    }
-}
-
-impl PartNumber {
-    /// Create a new `PartNumber` from a plain integer.
-    ///
-    /// Note that new uploads are required to start with a part number of 1,
-    /// which is how `PartNumber: Default`.
-    ///
-    /// With a handle on a current upload, [`increment`](PartNumber::increment)
-    /// should be used to create the next `PartNumber` when one has just been
-    /// added.
-    ///
-    /// Otherwise, use this when resuming a previous, partial upload.
-    pub fn new(n: i32) -> Self {
-        Self(n)
-    }
-
-    /// Increment the `PartNumber` by 1, returning the previous part number.
-    pub fn increment(&mut self) -> PartNumber {
-        self.0 += 1;
-        PartNumber(self.0 - 1)
     }
 }
 
@@ -148,12 +161,17 @@ impl Display for PartNumber {
 
 /// AWS entity tag.
 ///
-/// This value is a hash of an object. It is assigned to an uploaded part and
-/// returned in the response from a part upload request.
+/// This value is a hash of an object on S3; it is the canonical identifier in
+/// AWS of the object and its contents.
 ///
-/// It is also assigned to a completed upload and found in a successful complete
+/// A part in an upload has an e-tag, returned when the part was added
+/// successfully.  In this case, it is critical that the e-tag be retained
+/// alongside the [`PartNumber`] that it corresponded to.  These are needed in
+/// completing the upload.
+///
+/// It is also assigned to a completed upload, but more generally any S3 object.
 /// upload response.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct EntityTag(Cow<'static, str>);
 
 impl EntityTag {
@@ -161,7 +179,9 @@ impl EntityTag {
         Self(etag.into())
     }
 
-    pub(crate) fn try_from_upload_resp(value: &UploadResponse) -> Result<Self, ErrorRepr> {
+    pub(crate) fn try_from_upload_resp(
+        value: &UploadResponse,
+    ) -> Result<Self, ErrorRepr> {
         value
             .e_tag
             .as_deref()
@@ -169,7 +189,9 @@ impl EntityTag {
             .ok_or_else(|| ErrorRepr::Missing("UploadResponse", "e_tag"))
     }
 
-    pub(crate) fn try_from_complete_resp(value: &CompleteResponse) -> Result<Self, ErrorRepr> {
+    pub(crate) fn try_from_complete_resp(
+        value: &CompleteResponse,
+    ) -> Result<Self, ErrorRepr> {
         value
             .e_tag
             .as_deref()
@@ -214,105 +236,78 @@ impl From<String> for EntityTag {
 ///
 /// All `CompletedPart`s need to be retained in order to construct a valid
 /// complete upload request.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd)]
 pub struct CompletedPart {
-    /// The ID of the upload this part was added to.
-    pub id: UploadId,
-    /// The entity tag of the uploaded part is a hash of the object in S3 that
-    /// was created by uploading this part.
+    /// The etag of the object part in S3.
     pub etag: EntityTag,
-    /// The incrementing integer starting with 1 that identifies this part in the
-    /// part upload.
+    /// The incrementing integer starting with 1 that identifies this part in
+    /// the part upload.
     pub part_number: PartNumber,
     /// The size of this part in bytes.
     pub part_size: usize,
 }
 
 impl CompletedPart {
-    /// Create a new value from entity tag and part number used in the upload.
-    pub fn new(id: UploadId, etag: EntityTag, part_number: PartNumber, part_size: usize) -> Self {
-        Self {
-            id,
-            etag,
-            part_number,
-            part_size,
-        }
+    /// Create a new value.
+    pub fn new(
+        etag: EntityTag,
+        part_number: PartNumber,
+        part_size: usize,
+    ) -> Self {
+        Self { etag, part_number, part_size }
     }
 }
 
-/// All completed part uploads for a multipart upload.
+/// Collection of completed part uploads.
 #[derive(Debug, Clone, Default)]
-pub struct CompletedParts(Vec<CompletedPart>);
+pub struct CompletedParts {
+    parts: BTreeMap<PartNumber, CompletedPart>,
+    total_bytes: usize,
+}
 
 impl CompletedParts {
-    /// Add a new [`CompletedPart`] to this collection.
-    pub fn push(&mut self, part: CompletedPart) {
-        self.0.push(part);
+    /// Add a new `CompletedPart` to the collection, skipping the operation if
+    /// the part number already exists.
+    pub fn insert(&mut self, part: CompletedPart) {
+        let k = part.part_number;
+        if !self.parts.contains_key(&k) {
+            self.total_bytes += part.part_size;
+            self.parts.insert(k, part);
+        }
     }
 
-    /// Extend this `CompletedParts` by the values from another.
-    pub fn extend(&mut self, other: CompletedParts) {
-        self.0.extend(other.0);
-        self.sort_ascending();
+    /// Moves all completed parts from `other` into `self`, skipping the
+    /// operation if the part number already exists.
+    pub fn append(&mut self, other: CompletedParts) {
+        other.parts.into_values().for_each(|v| {
+            self.insert(v);
+        })
     }
 
     /// Returns the number of parts that have been successfully uploaded.
     pub fn count(&self) -> usize {
-        self.0.len()
+        self.parts.len()
     }
 
     /// Returns the current size in bytes of this upload.
     pub fn size(&self) -> usize {
-        self.0.iter().map(|p| p.part_size).sum()
-    }
-
-    /// Get the largest part number assigned, which ordinarily is the most
-    /// recently uploaded part.
-    pub fn max_part_number(&self) -> PartNumber {
-        match self.0.iter().max_by_key(|p| p.part_number) {
-            Some(part) => part.part_number,
-            _ => PartNumber::default(),
-        }
-    }
-
-    /// Sort the `CompletedPart`s in increasing order by part number.
-    ///
-    /// It is an error to make a request where the completed parts are not in
-    /// order.
-    pub fn sort_ascending(&mut self) {
-        self.sort_by_key(|part| part.part_number);
-    }
-}
-
-impl Deref for CompletedParts {
-    type Target = [CompletedPart];
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for CompletedParts {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+        self.total_bytes
     }
 }
 
 impl From<&CompletedParts> for aws_sdk_s3::types::CompletedMultipartUpload {
-    fn from(value: &CompletedParts) -> Self {
-        let completed_parts = value.0.iter().fold(Vec::new(), |mut acc, v| {
+    fn from(vs: &CompletedParts) -> Self {
+        let parts = vs.parts.values().fold(Vec::new(), |mut acc, v| {
             acc.push(
                 aws_sdk_s3::types::CompletedPart::builder()
-                    .e_tag(v.etag.to_string())
+                    .e_tag(&*v.etag)
                     .part_number(*v.part_number)
                     .build(),
             );
-
             acc
         });
-
         aws_sdk_s3::types::CompletedMultipartUpload::builder()
-            .set_parts(Some(completed_parts))
+            .set_parts(Some(parts))
             .build()
     }
 }

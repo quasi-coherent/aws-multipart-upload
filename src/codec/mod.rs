@@ -3,9 +3,9 @@
 //! This module defines `PartEncoder` and a few select implementations.
 //! `PartEncoder` describes how an item should be written as bytes to a part
 //! upload request body.
-use crate::client::part::PartBody;
-
 use bytes::BufMut;
+
+use crate::client::part::PartBody;
 
 #[cfg(feature = "csv")]
 #[cfg_attr(docsrs, doc(cfg(feature = "csv")))]
@@ -25,11 +25,11 @@ pub use lines_writer::LinesEncoder;
 
 /// Encoding for items in a part of a multipart upload.
 pub trait PartEncoder<Item> {
-    /// The type of value returned when encoding items is not successful.
+    /// The type of value returned when encoding an item is not successful.
     type Error: EncodeError;
 
-    /// Restore this encoder's state for a new upload.
-    fn restore(&self) -> Result<Self, Self::Error>
+    /// Return an encoder that is ready for a new upload.
+    fn new_upload(&self) -> Result<Self, Self::Error>
     where
         Self: Sized;
 
@@ -42,23 +42,27 @@ pub trait PartEncoder<Item> {
     /// Convert the encoder to a `PartBody`.
     fn into_body(self) -> Result<PartBody, Self::Error>;
 
-    /// Clear the encoder to prepare for a new part.
+    /// Return an encoder that is ready for a new part.  Defers to `new_upload`
+    /// in the provided implementation.
     ///
-    /// Override this method to provide an alternative means of building the
-    /// encoder in between uploads if, for example if preparing for a new part is
-    /// different than preparing for a new upload.
-    fn clear(&self) -> Result<Self, Self::Error>
+    /// Override this to provide a different means of preparing for a new part
+    /// if `new_upload` is specifically for the first part.
+    ///
+    /// For example, an encoder may implement `new_upload` to write a header row
+    /// but this is only valid for the first part.  So `new_part` would instead
+    /// skip writing a header.
+    fn new_part(&self) -> Result<Self, Self::Error>
     where
         Self: Sized,
     {
-        self.restore()
+        self.new_upload()
     }
 }
 
 impl<T: AsRef<[u8]>> PartEncoder<T> for PartBody {
     type Error = std::convert::Infallible;
 
-    fn restore(&self) -> Result<Self, Self::Error> {
+    fn new_upload(&self) -> Result<Self, Self::Error> {
         let capacity = self.capacity();
         Ok(Self::with_capacity(capacity))
     }

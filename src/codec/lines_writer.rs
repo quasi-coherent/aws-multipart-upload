@@ -1,10 +1,11 @@
-use crate::AWS_MIN_PART_SIZE;
-use crate::client::part::PartBody;
-use crate::codec::PartEncoder;
-
-use bytes::BufMut as _;
 use std::convert::Infallible;
 use std::ops::DerefMut;
+
+use bytes::BufMut as _;
+
+use crate::client::part::PartBody;
+use crate::codec::PartEncoder;
+use crate::upload::AWS_MIN_PART_SIZE;
 
 /// `LinesEncoder` implements `PartEncoder` by writing the input items delimited
 /// by the newline character `\n` on all platforms.
@@ -17,10 +18,7 @@ pub struct LinesEncoder {
 impl LinesEncoder {
     /// Set the header to write as the first row of the first part.
     pub fn with_header<T: Into<String>>(self, header: T) -> Self {
-        Self {
-            header: Some(header.into()),
-            ..self
-        }
+        Self { header: Some(header.into()), ..self }
     }
 }
 
@@ -36,16 +34,13 @@ impl Default for LinesEncoder {
 impl<Item: AsRef<str>> PartEncoder<Item> for LinesEncoder {
     type Error = Infallible;
 
-    fn restore(&self) -> Result<Self, Self::Error> {
+    fn new_upload(&self) -> Result<Self, Self::Error> {
         let capacity = self.writer.capacity();
         let mut writer = PartBody::with_capacity(capacity);
         if let Some(h) = self.header.as_deref() {
             writer.put(h.as_bytes());
         }
-        Ok(Self {
-            writer,
-            header: self.header.clone(),
-        })
+        Ok(Self { writer, header: self.header.clone() })
     }
 
     fn encode(&mut self, item: Item) -> Result<usize, Self::Error> {
@@ -65,7 +60,7 @@ impl<Item: AsRef<str>> PartEncoder<Item> for LinesEncoder {
         Ok(self.writer)
     }
 
-    fn clear(&self) -> Result<Self, Self::Error> {
+    fn new_part(&self) -> Result<Self, Self::Error> {
         let capacity = self.writer.capacity();
         Ok(Self {
             writer: PartBody::with_capacity(capacity),
