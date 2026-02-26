@@ -1,0 +1,30 @@
+name: ci
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master", "rc/*" ]
+
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_GIT_FETCH_WITH_CLI: true
+  CARGO_NET_RETRY: 10
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  RUSTDOCFLAGS: -D warnings
+  RUSTFLAGS: -D warnings
+
+concurrency:
+  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+
+jobs:
+  build:
+    name: cargo build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: taiki-e/checkout-action@v1.4.0
+      - name: install rust
+        uses: taiki-e/github-actions/install-rust@nightly
+      - run: cargo b --all-features --all-targets

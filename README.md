@@ -42,7 +42,7 @@ like to be using, when performing multipart uploads.
 Add the crate to your Cargo.toml:
 
 ```toml
-aws-multipart-upload = "0.1.0-rc5"
+aws-multipart-upload = "0.1.0"
 ```
 
 The feature flag `"csv"` enables a "part encoder"--the component responsible for writing items to a
@@ -57,31 +57,29 @@ See more examples [here][repo-eg].
 
 ```rust
 use aws_multipart_upload::{ByteSize, SdkClient, UploadBuilder};
-use aws_multipart_upload::codec::CsvEncoder;
-use aws_multipart_upload::write::UploadStreamExt as _;
+use aws_multipart_upload::encoder::CsvEncoder;
+use aws_multipart_upload::prelude::*;
 use futures::stream::{self, StreamExt as _};
 use serde_json::{Value, json};
 
-/// Default aws-sdk-s3 client:
+// Default aws-sdk-s3 client:
 let client = SdkClient::defaults().await;
 
-/// Use `UploadBuilder` to build a multipart uploader:
+// Use `UploadBuilder` to build a multipart uploader:
 let upl = UploadBuilder::new(client)
-    .with_encoder(CsvEncoder::default().with_header())
     .with_part_size(ByteSize::mib(10))
     .with_uri(("example-bucket-us-east-1", "destination/key.csv"))
-    .build();
+    .build_upload_from(CsvEncoder::default());
 
-/// Consume a stream of `Value`s by forwarding it to `upl`,
-/// and poll for completion:
-let values = stream::iter(0..).map(|n| json!({"n": n, "n_sq": n * n}));
-let completed = values
-    .take(100000)
+// Consume a stream of `Value`s by forwarding it to `upl`, and poll for
+// completion:
+let out = stream::iter(0..=100000)
+    .map(|n| json!({"n": n, "n_sq": n * n}))
     .collect_upload(upl)
     .await
     .unwrap();
 
-println!("object uploaded: {}", completed.uri);
+println!("{} bytes uploaded at {}", out.bytes, out.uri);
 ```
 
 [SDK]: https://awslabs.github.io/aws-sdk-rust/

@@ -1,38 +1,40 @@
+use std::fmt::{self, Debug, Formatter};
+use std::pin::Pin;
+use std::task::{Context, Poll};
+
+use futures::future::BoxFuture;
+
 use super::UploadPartRequestBuilder;
 use crate::client::part::{CompletedPart, PartBody, PartNumber};
 use crate::client::{UploadClient, UploadData, UploadId};
 use crate::error::{ErrorRepr, Result};
 use crate::uri::ObjectUri;
 
-use std::fmt::{self, Debug, Formatter};
-use std::pin::Pin;
-use std::task::{Context, Poll};
-
 /// Sending a request to add a part to an existing multpart upload.
-pub struct SendUploadPart(pub(crate) Pin<Box<dyn Future<Output = Result<CompletedPart>>>>);
+pub struct SendUploadPart(pub(crate) BoxFuture<'static, Result<CompletedPart>>);
 
 impl SendUploadPart {
     /// Create a new `SendUploadPart`.
     pub fn new(client: &UploadClient, req: UploadPartRequest) -> Self {
         let cli = client.clone();
-        Self(Box::pin(
-            async move { cli.inner.send_upload_part(req).await },
-        ))
+        Self(Box::pin(async move { cli.inner.send_upload_part(req).await }))
     }
 }
 
 impl Future for SendUploadPart {
     type Output = Result<CompletedPart>;
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+
+    fn poll(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Self::Output> {
         self.0.as_mut().poll(cx)
     }
 }
 
 impl Debug for SendUploadPart {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("SendUploadPart")
-            .field(&"Future<Output = Result<CompletedPart>>")
-            .finish()
+        f.debug_tuple("SendUploadPart").finish()
     }
 }
 
@@ -47,17 +49,20 @@ pub struct UploadPartRequest {
 
 impl UploadPartRequest {
     /// Create a new `UploadPartRequest` from the minimum required.
-    pub fn new(data: &UploadData, body: PartBody, part_number: PartNumber) -> Self {
-        Self {
-            id: data.get_id(),
-            uri: data.get_uri(),
-            body,
-            part_number,
-        }
+    pub fn new(
+        data: &UploadData,
+        body: PartBody,
+        part_number: PartNumber,
+    ) -> Self {
+        Self { id: data.get_id(), uri: data.get_uri(), body, part_number }
     }
 
-    /// Set the required properties on the SDK request builder for the operation.
-    pub fn with_builder(&mut self, builder: UploadPartRequestBuilder) -> UploadPartRequestBuilder {
+    /// Set the required properties on the SDK request builder for the
+    /// operation.
+    pub fn with_builder(
+        &mut self,
+        builder: UploadPartRequestBuilder,
+    ) -> UploadPartRequestBuilder {
         builder
             .upload_id(&*self.id)
             .bucket(&*self.uri.bucket)
@@ -88,9 +93,11 @@ impl UploadPartRequest {
 
     pub(crate) fn validate(&self) -> Result<()> {
         if self.id.is_empty() || self.uri.is_empty() {
-            return Err(
-                ErrorRepr::Missing("UploadPartRequest", "empty upload id and/or uri").into(),
-            );
+            return Err(ErrorRepr::Missing(
+                "UploadPartRequest",
+                "empty upload id and/or uri",
+            )
+            .into());
         }
         Ok(())
     }

@@ -1,125 +1,94 @@
-//! A collection of `MultipartWrite` implementations for multipart uploads.
-//!
-//! The module contains implementations [`Upload`] and [`EncodedUpload`],
-//! components for building multipart writers like them, and extension traits
-//! for `MultipartWrite` and `Stream` providing useful combinator methods
-//! supporting multipart uploads.
-use crate::client::UploadClient;
-use crate::client::part::{CompletedParts, PartBody};
-use crate::client::request::{CompletedUpload, SendUploadPart};
-use crate::codec::PartEncoder;
-use crate::error::Error as UploadError;
-use crate::uri::ObjectUriIter;
+use std::time::Duration;
 
-use bytesize::ByteSize;
 use futures::Stream;
-use multipart_write::stream::{Assemble, Assembled};
-use multipart_write::{FusedMultipartWrite, MultipartStreamExt as _, MultipartWrite};
+use multipart_write::stream::{
+    CompleteWith, MultipartStreamExt as _, TryCompleteWhen,
+};
+use multipart_write::{FusedMultipartWrite, MultipartWrite};
 
-mod encoded;
-pub use self::encoded::{EncodedUpload, Status};
+use self::multipart_upload::UploadStatus;
+use crate::client::part::EntityTag;
+use crate::uri::ObjectUri;
 
+pub mod multipart_upload;
 mod part_buffer;
-pub use self::part_buffer::PartBuffer;
+pub mod with_part_encoder;
 
-mod upload;
-pub use self::upload::{Upload, UploadSent};
-
-/// A type for creating, building, and completing a multipart upload.
-pub type MultipartUpload<E> = EncodedUpload<E, Upload<PartBuffer>>;
-
-/// Trait alias for a general form of `MultipartUpload`.
-pub trait AwsMultipartUpload<Item>
-where
-    Self: FusedMultipartWrite<Item, Ret = Status, Error = UploadError, Output = CompletedUpload>,
-{
+/// Value returned by multipart uploads when polled for completion.
+#[derive(Debug, Clone)]
+pub struct Uploaded {
+    /// The uploaded object's URI.
+    pub uri: ObjectUri,
+    /// The entity tag of the uploaded object.
+    pub etag: EntityTag,
+    /// Size in bytes of the upload.
+    pub bytes: u64,
+    /// Number of parts that went into the upload.
+    pub parts: u64,
+    /// Number of items that went into the upload, if known.
+    pub items: Option<u64>,
+    /// Total duration of the multipart upload.
+    pub duration: Duration,
 }
 
-impl<Item, E: PartEncoder<Item>> AwsMultipartUpload<Item> for MultipartUpload<E> {}
-
-/// Extension trait for `MultipartWrite` adding specializations for S3 uploads.
-pub trait UploadWriteExt<Part>: MultipartWrite<Part> {
-    /// Returns a new `MultipartWrite` that uploads to a multipart upload, using
-    /// this writer as a buffer for request futures.
-    fn upload(self, client: &UploadClient, iter: ObjectUriIter) -> Upload<Self>
-    where
-        Self: MultipartWrite<SendUploadPart, Error = UploadError, Output = CompletedParts> + Sized,
-    {
-        Upload::new(self, client, iter)
-    }
-
-    /// Transform this `MultipartWrite` by composing a [`PartEncoder`] in front
-    /// of it, resulting in a new one over any type of value that the encoder
-    /// is capable of writing.
-    ///
-    /// [`PartEncoder`]: crate::codec::PartEncoder
-    fn encoded_upload<E>(
-        self,
-        encoder: E,
-        bytes: ByteSize,
-        part_bytes: ByteSize,
-    ) -> EncodedUpload<E, Self>
-    where
-        Self: MultipartWrite<
-                PartBody,
-                Ret = UploadSent,
-                Error = UploadError,
-                Output = CompletedUpload,
-            > + Sized,
-    {
-        EncodedUpload::new(self, encoder, bytes.as_u64(), part_bytes.as_u64())
-    }
+/// Whether the upload should be completed.
+pub trait ShouldComplete {
+    /// Return `true` if the upload should be completed.
+    fn should_complete(&self) -> bool;
 }
 
-impl<Part, Wr: MultipartWrite<Part>> UploadWriteExt<Part> for Wr {}
+/// Future that consumes a stream in its entirety by adding it in parts to a
+/// multipart upload, completing the upload when the stream is exhaused.
+pub type CollectUpload<St, U> = CompleteWith<St, U>;
 
-/// Future for the result of collecting a stream into a multipart upload.
-pub type CollectUpload<St, U> = Assemble<St, U>;
-
-/// Stream of results from sending an input stream to a multipart upload.
-pub type IntoUpload<St, U, F> = Assembled<St, U, F>;
+/// Stream that writes its input to a multipart upload and completes it when the
+/// condition is met.
+pub type TryUploadWhen<St, U, F> = TryCompleteWhen<St, U, F>;
 
 /// Extension of `Stream` by methods for uploading it.
 pub trait UploadStreamExt: Stream {
-    /// Collect this stream into a multipart upload, returning the result of
-    /// completing the upload in a future.
-    fn collect_upload<U>(self, uploader: U) -> CollectUpload<Self, U>
+    /// Future that writes a stream in parts to an upload `U`, completing the
+    /// upload when the stream is exhausted.
+    fn collect_upload<U>(self, upload: U) -> CollectUpload<Self, U>
     where
         Self: Sized,
-        U: FusedMultipartWrite<Self::Item, Error = UploadError, Output = CompletedUpload>,
+        U: MultipartWrite<Self::Item>,
     {
-        self.assemble(uploader)
+        self.complete_with(upload)
     }
 
-    /// Transform the input stream by writing its items to the uploader `U`,
-    /// producing the next item in the stream by completing the upload when the
-    /// status indicates the upload is complete.
+    /// Tranforms this stream by writing its items as parts to an upload `U`
+    /// with return value `UploadStatus`.
     ///
-    /// The resulting stream ends when either the input stream is exhausted or
-    /// the uploader is unable to start the next upload after producing an item.
-    fn into_upload<U>(self, uploader: U) -> IntoUpload<Self, U, fn(&Status) -> bool>
+    /// The resulting stream produces an item from the result of completing `U`
+    /// when the status indicates the upload has reached the target size.
+    fn try_upload<U, R>(
+        self,
+        upload: U,
+    ) -> TryUploadWhen<Self, U, fn(R) -> bool>
     where
         Self: Sized,
-        U: FusedMultipartWrite<
-                Self::Item,
-                Ret = Status,
-                Error = UploadError,
-                Output = CompletedUpload,
-            >,
+        U: FusedMultipartWrite<Self::Item, Recv = R>,
+        R: ShouldComplete,
     {
-        self.assembled(uploader, |status| status.should_complete)
+        self.try_complete_when(upload, |r| r.should_complete())
     }
 
-    /// Transform the input stream by writing its items to the uploader `U`,
-    /// producing the next item in the stream by completing the upload when the
-    /// given closure returns true.
-    fn into_upload_when<U, F>(self, uploader: U, f: F) -> IntoUpload<Self, U, F>
+    /// Tranforms this stream by writing its items as parts to an upload `U`.
+    ///
+    /// Like [`try_upload`](Self::try_upload) except the predicate `F` is not
+    /// prescribed.
+    fn try_upload_when<U, F>(
+        self,
+        uploader: U,
+        f: F,
+    ) -> TryUploadWhen<Self, U, F>
     where
         Self: Sized,
-        U: FusedMultipartWrite<Self::Item, Error = UploadError, Output = CompletedUpload>,
-        F: FnMut(&U::Ret) -> bool,
+        U: FusedMultipartWrite<Self::Item>,
+        F: FnMut(U::Recv) -> bool,
     {
-        self.assembled(uploader, f)
+        self.try_complete_when(uploader, f)
     }
 }
 
