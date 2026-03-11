@@ -65,11 +65,11 @@ use serde_json::{Value, json};
 // Default aws-sdk-s3 client:
 let client = SdkClient::defaults().await;
 
-// Use `UploadBuilder` to build a multipart uploader:
+// Use `UploadBuilder` to build an `EncodeUpload`:
 let upl = UploadBuilder::new(client)
     .with_part_size(ByteSize::mib(10))
     .with_uri(("example-bucket-us-east-1", "destination/key.csv"))
-    .build_upload_from(CsvEncoder::default());
+    .build_encoded(CsvEncoder::default());
 
 // Consume a stream of `Value`s by forwarding it to `upl`, and poll for
 // completion:
